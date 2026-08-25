@@ -4,8 +4,9 @@ Standalone [Tutor](https://docs.tutor.edly.io/) plugins for the OpenSecurityTrai
 Open edX deployments — **dev** (`dev.ost2.fyi`), **p** (`p.ost2.fyi`, live prod),
 and **beta** (`beta.ost2.fyi`).
 
-These are **single-file Tutor v1 plugins** (each registers its hooks directly via
-`tutor.hooks`). They are dropped into the Tutor plugins root
+These are **single-file Tutor plugins** — mostly Python v1 plugins (each registers its
+hooks directly via `tutor.hooks`), plus declarative **YAML patch plugins** (`.yml`).
+They are dropped into the Tutor plugins root
 (`$(tutor plugins printroot)` = `~/.local/share/tutor-plugins/`) and enabled per box.
 Most are **settings-only** — the Open edX settings dir is bind-mounted into the
 containers, so applying a change needs only `tutor config save` + a service restart,
@@ -25,7 +26,7 @@ beta/     beta.ost2.fyi extras + beta-specific variants
 ```
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
-each box is exactly `common` (9) plus that box's directory — dev=15, p=14, beta=15,
+each box is exactly `common` (10) plus that box's directory — dev=16, p=15, beta=16,
 matching the live `tutor plugins list` on each. Contents were captured verbatim from
 the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
 md5-identical to what is deployed.
@@ -43,6 +44,7 @@ md5-identical to what is deployed.
 | ost2_handouts | ● | ● | ● | `common/` |
 | password_policy | ● | ● | ● | `common/` |
 | registration_custom_fields | ● | ● | ● | `common/` |
+| enable_instructor_certificate_management | ● | ● | ● | `common/` |
 | ost2_course_discovery_sort | ● | ● | ● | per-box — **differs** |
 | ost2_discussions_mfe_fork | ● | ● | ● | per-box — host |
 | ost2_forum_profile_links | ● | ● | ● | per-box — host |
@@ -78,6 +80,7 @@ md5-identical to what is deployed.
 - **ost2_handouts** — course handouts fix.
 - **password_policy** — `AUTH_PASSWORD_VALIDATORS` (min length 18, no complexity, max 128) + longer generated passwords so OAuth signups don't 400.
 - **registration_custom_fields** — custom registration fields (only AGE required).
+- **enable_instructor_certificate_management** — show the instructor-dashboard **Certificates** tab (`/courses/<id>/instructor#view-certificates`) to course-team **Admins** (`CourseInstructorRole`), not only to global site staff. Sets `FEATURES["ENABLE_CERTIFICATES_INSTRUCTOR_MANAGE"] = True`, because `instructor_dashboard.py` gates that section on `access['admin']`, which is Django's site-wide `request.user.is_staff` despite the name. The certificate endpoints in `instructor/permissions.py` are already `is_staff | HasAccessRule('instructor')`, so this only reveals UI the course Admin was already authorized to use — it does not widen who may call those endpoints. Effect is per-course (only where they hold Admin). Does **not** enable the bulk Generate/Regenerate panel — that is a separate flag, `CERTIFICATES_INSTRUCTOR_GENERATION`, left off.
 - **ost2_course_discovery_sort** — sort the `/courses` discovery catalog (oldest start first; +title tie-break on dev).
 - **ost2_discussions_mfe_fork** — repoint the discussions MFE to the XenoKovah fork (default Oldest-first sort, etc.).
 - **ost2_forum_profile_links** — make forum `/u/<name>` author links resolve to the profile MFE (`PROFILE_MFE_BASE`).
@@ -92,9 +95,12 @@ Copy `common/` + the box's directory into the Tutor plugins root, enable each, t
 apply:
 
 ```
+box=dev                                     # or p , beta
 root=$(~/tutor-venv/bin/tutor plugins printroot)
-cp common/*.py dev/*.py "$root"/            # or p/*.py , beta/*.py
-for f in "$root"/*.py; do ~/tutor-venv/bin/tutor plugins enable "$(basename "${f%.py}")"; done
+cp common/* "$box"/* "$root"/
+for f in common/* "$box"/*; do
+  b=$(basename "$f"); ~/tutor-venv/bin/tutor plugins enable "${b%.*}"
+done
 ~/tutor-venv/bin/tutor config save
 ~/tutor-venv/bin/tutor local restart lms cms
 ```

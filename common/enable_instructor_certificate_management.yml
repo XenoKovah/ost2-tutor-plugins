@@ -1,0 +1,20 @@
+# Show the instructor-dashboard "Certificates" tab (#view-certificates) to course-team
+# Admins (CourseInstructorRole), not only to global/site staff (Django is_staff).
+#
+# Why: lms/djangoapps/instructor/views/instructor_dashboard.py gates that section on
+#   access['admin'] or (access['instructor'] and certs_instructor_enabled)
+# where access['admin'] is request.user.is_staff (SITE-WIDE staff, despite the name)
+# and certs_instructor_enabled is this flag. Course "Admin" alone therefore saw no tab.
+#
+# Safe to enable: the certificate endpoints in lms/djangoapps/instructor/permissions.py
+# are already `is_staff | HasAccessRule('instructor')`, so this only reveals UI that the
+# course Admin was already authorized to use. Effect is per-course: a user sees the tab
+# only on courses where they hold the Admin/instructor role.
+#
+# Does NOT enable the bulk "Generate Certificates" panel - that is a separate flag,
+# FEATURES["CERTIFICATES_INSTRUCTOR_GENERATION"], deliberately left off.
+name: enable_instructor_certificate_management
+version: 0.1.0
+patches:
+  openedx-lms-common-settings: |
+    FEATURES["ENABLE_CERTIFICATES_INSTRUCTOR_MANAGE"] = True
