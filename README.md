@@ -52,6 +52,7 @@ md5-identical to what is deployed.
 | ost2_courses_hide_completed | ● | — | ● | `dev/`, `beta/` |
 | GoogleAnalytics4Plugin | ○ | ● | ● | per-box — GA id |
 | ost2_student_grade_lookup | ● | — | — | `dev/` (prototype) |
+| ost2_communications_mfe_fork | ● | — | — | `dev/` (needs matching LMS branch) |
 
 ● enabled · ○ present but **disabled** · — not installed
 
@@ -88,6 +89,7 @@ md5-identical to what is deployed.
 - **ost2_courses_hide_completed** — hide already-completed courses from the `/courses` listing.
 - **GoogleAnalytics4Plugin** — inject the GA4 tag id on the LMS + MFEs.
 - **ost2_student_grade_lookup** — staff-only `/admin/student-grade-lookup/` page: look up a learner by username/email/ID and list all enrollments + live grade % + certificate status (incl. certificate-exception flag); sortable columns; linked from the admin index.
+- **ost2_communications_mfe_fork** — repoint the communications (bulk email) MFE to the XenoKovah fork that adds the "Don't send to" → "Students who completed the class." checkbox. Requires the edx-platform branch `teak3_12_bulk_email_exclude_completed`, which teaches the LMS the `exclude_completed` target; without it the LMS rejects the send with a 400. Changes an MFE image, so it needs an MFE rebuild, not just `tutor config save`.
 
 ## Deploy (per box)
 
