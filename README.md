@@ -53,6 +53,7 @@ md5-identical to what is deployed.
 | GoogleAnalytics4Plugin | ○ | ● | ● | per-box — GA id |
 | ost2_student_grade_lookup | ● | — | — | `dev/` (prototype) |
 | ost2_communications_mfe_fork | ● | — | — | `dev/` (needs matching LMS branch) |
+| ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
 
 ● enabled · ○ present but **disabled** · — not installed
 
@@ -90,6 +91,7 @@ md5-identical to what is deployed.
 - **GoogleAnalytics4Plugin** — inject the GA4 tag id on the LMS + MFEs.
 - **ost2_student_grade_lookup** — staff-only `/admin/student-grade-lookup/` page: look up a learner by username/email/ID and list all enrollments + live grade % + certificate status (incl. certificate-exception flag); sortable columns; linked from the admin index.
 - **ost2_communications_mfe_fork** — repoint the communications (bulk email) MFE to the XenoKovah fork that adds the "Don't send to" → "Students who completed the class." checkbox. Requires the edx-platform branch `teak3_12_bulk_email_exclude_completed`, which teaches the LMS the `exclude_completed` target; without it the LMS rejects the send with a 400. Changes an MFE image, so it needs an MFE rebuild, not just `tutor config save`.
+- **ost2_search_unreleased_for_staff** — let course staff search courses that have not started yet. edx-search's `SearchFilterGenerator.filter_dictionary()` hard-codes `{"start_date": DateRange(None, utcnow())}`, and `LmsSearchFilterGenerator` does not override it, so every block of a future-dated course is filtered out of search results — for staff and superusers too. OST2 uses a far-future start (typically 2030-01-01) as the “keep this course unreleased” sentinel, so those courses were silently unsearchable even though they were fully indexed (InstructorHowTo: 123 docs in Meilisearch, 36 matching “video”, `/search/` returned 0). **Reindexing does not fix this and never will.** Points `SEARCH_FILTER_GENERATOR` at a wrapper that delegates to the stock generator and drops *only* the `start_date` bound, and only for staff: with a `course_id`, for anyone holding `has_access(user, 'staff', course_key)` (course staff/instructor or global staff); without one, for global staff only. Learners keep the stock filter, so unreleased text cannot leak via the `/search/` endpoint; any error fails closed. Imports are deferred into method bodies because the settings module loads before `django.setup()`. Settings-only — `tutor config save` + `tutor local restart lms`.
 
 ## Deploy (per box)
 
