@@ -58,13 +58,15 @@ idx = getattr(settings, "COURSEWARE_INFO_INDEX_NAME", "course_info")
 client = ms.get_meilisearch_client()
 index = client.get_index(ms.get_meilisearch_index_name(idx))
 current = list(index.get_sortable_attributes())
-if "start" not in current:
-    new = sorted(set(current + ["start"]))
+wanted = ["start", "content.display_name"]
+missing = [a for a in wanted if a not in current]
+if missing:
+    new = sorted(set(current + wanted))
     task = index.update_sortable_attributes(new)
     ms.wait_for_task_to_succeed(client, task, timeout_in_ms=30000)
     print("ost2_course_discovery_sort: set sortableAttributes ->", new)
 else:
-    print("ost2_course_discovery_sort: start already sortable")
+    print("ost2_course_discovery_sort: start + title already sortable")
 PYEOF
 """
 
@@ -77,9 +79,11 @@ hooks.Filters.CLI_DO_INIT_TASKS.add_item(("lms", _INIT_TASK))
 # until the first request, when settings are fully configured.
 # ---------------------------------------------------------------------------
 _SETTINGS_PATCH = '''
-# OST2: sort the /courses discovery catalog by course start date (oldest first).
-# Flip to ["start:desc"] for newest-first, or [] to disable.
-RGG_COURSE_DISCOVERY_SORT = ["start:asc"]
+# OST2: sort the /courses discovery catalog by course start date (oldest first),
+# then alphabetically by course title (content.display_name) as the tie-break for
+# courses sharing a start date. Flip the first term to ["start:desc"] for
+# newest-first, or set [] to disable. Both fields must be sortable (Piece 1).
+RGG_COURSE_DISCOVERY_SORT = ["start:asc", "content.display_name:asc"]
 
 from django.core.signals import request_started as _ost2_request_started
 from django.dispatch import receiver as _ost2_receiver
