@@ -17,6 +17,6 @@ hooks.Filters.ENV_PATCHES.add_item(
         "openedx-dockerfile-post-python-requirements",
         'RUN pip install --force-reinstall --no-deps '
         '"git+https://github.com/XenoKovah/forum.git'
-        '@a5039e740ae062a3fb9e0ce62965370a707d93a6"',
+        '@c88c29bf22b0cc6498151300fc8df404b6d4978d"',
     )
 )
