@@ -42,7 +42,18 @@ HOW
      stock Homework/Lab/Midterm/Final policy is left alone, so a new subsection
      can never end up with an assignment type the course does not define.
      Course IMPORT does not go through create_xblock, so imported classes keep
-     the grading that shipped in their OLX.
+     the grading that shipped in their OLX. VERIFIED on dev: importing an OLX
+     over a freshly created course (which now carries this default) restored
+     the OLX's own GRADER/GRADE_CUTOFFS and its per-subsection graded/format
+     exactly, ungraded subsections included.
+
+     CAVEAT -- an OLX with NO policies/<run>/grading_policy.json has nothing to
+     override with, so such a course now falls back to THIS default instead of
+     the upstream Homework/Lab/Midterm/Final one. A normal Studio export always
+     writes grading_policy.json, so this only affects hand-built or stripped
+     OLX. For OST2 the new fallback is the better one anyway: those courses'
+     subsections are already formatted "Progress Marker", which the upstream
+     default does not define as a grader bucket at all.
 
 BLAST RADIUS
   A course that has never saved a grading policy falls back to the field
