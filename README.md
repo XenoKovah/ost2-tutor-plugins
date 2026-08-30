@@ -65,11 +65,11 @@ md5-identical to what is deployed.
 - **ost2_forum_profile_links**, **ost2_discussions_mfe_fork**, **ost2_mfe_media_proxy**
   — differ only by the baked-in MFE host (`apps.dev|p|beta.ost2.fyi`). dev's and p's
   `ost2_mfe_media_proxy.py` are byte-identical; beta's differs only in its docstring.
-- **ost2_authoring_mfe_fork** — **dev runs a newer fork branch**: dev pins
-  `teak3_3_remove-studio-home-about-blurb`, p and beta still pin
+- **ost2_authoring_mfe_fork** — **p lags one fork branch**: dev and beta pin
+  `teak3_3_remove-studio-home-about-blurb` (byte-identical copies), p still pins
   `teak3_2_course-handouts-ui`. teak3_3 only drops the "New to Studio?" about blurb
-  from the Studio home sidebar, so converging p/beta is purely additive — bump the pin
-  and rebuild the `mfe` image on those boxes.
+  from the Studio home sidebar, so converging p is purely additive — bump the pin and
+  rebuild the `mfe` image there.
 - **ost2_course_discovery_sort** — **dev runs a newer variant** (sorts the `/courses`
   catalog by course start date, then course title `content.display_name` as tie-break);
   p and beta run the older **start-only** variant. Converging p/beta to dev's version is
@@ -81,7 +81,7 @@ md5-identical to what is deployed.
 - **disable_studio_course_pagination** — Studio home lists all courses on one page (pre-Teak behavior).
 - **ost2_authn_mfe_fork** — repoint the authn MFE to the XenoKovah fork (18-char password policy branch).
 - **ost2_authoring_mfe_fork** — repoint the authoring (Studio) MFE to the XenoKovah fork
-  (dev is one branch ahead of p/beta; see Per-box differences).
+  (p is one branch behind dev/beta; see Per-box differences).
 - **ost2_disable_survey_report** — disable the LMS Django-admin "Open edX Data Sharing Initiative" banner (`SURVEY_REPORT_ENABLE=False`).
 - **ost2_email_ratelimit** — `RateLimitedEmailBackend` to stay under Gmail send throttles.
 - **ost2_forum_sort_fix** — force-install the forum fork with the MySQL child-comment sort fix.

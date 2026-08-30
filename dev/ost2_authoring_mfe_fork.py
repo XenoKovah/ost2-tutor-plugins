@@ -9,8 +9,8 @@ release/teak.3 tag) -- rather than build-time seds.
 
 Branch history: teak3_1 = Live-settings validation fix; teak3_2 = Course
 Handouts UI gating + video-editor has_changes; teak3_3 = drop the "New to
-Studio?" about blurb from the Studio home sidebar.  p and beta are still on
-teak3_2 -- this is the dev-only variant.
+Studio?" about blurb from the Studio home sidebar.
+p is still on teak3_2 -- dev and beta share this variant.
 
 BUILD-WIRING plugin only: it repoints the authoring MFE's git source via
 tutor-mfe's MFE_APPS filter. It does NOT patch source. After enabling:
