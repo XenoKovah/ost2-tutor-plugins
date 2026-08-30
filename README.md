@@ -26,7 +26,7 @@ beta/     beta.ost2.fyi extras + beta-specific variants
 ```
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
-each box is exactly `common` (9) plus that box's directory — dev=19, p=15, beta=16,
+each box is exactly `common` (9) plus that box's directory — dev=20, p=15, beta=16,
 matching the live `tutor plugins list` on each. Contents were captured verbatim from
 the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
 md5-identical to what is deployed.
@@ -56,6 +56,7 @@ md5-identical to what is deployed.
 | ost2_communications_mfe_fork | ● | — | — | `dev/` (needs matching LMS branch) |
 | ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
 | disable_markdown_safemode | ● | ? | ○ | `dev/` |
+| ost2_markdown_xblock_parse_xml | ● | — | — | `dev/` — needs `tutor images build openedx` |
 
 ● enabled · ○ present but **disabled** · — not installed · ? not verified
 
@@ -145,6 +146,28 @@ md5-identical to what is deployed.
   by rendering every markdown block before and after: `[HTML_REMOVED]` 164 → 0, 2190 of 2447
   byte-identical, and no block lost content. Settings-only — `tutor config save` +
   `tutor local restart lms cms lms-worker cms-worker`.
+- **ost2_markdown_xblock_parse_xml** — stop OLX course import from **silently dropping every
+  Markdown component**. markdown-xblock 1.4.0 declares
+  `parse_xml(cls, node, runtime, keys, id_generator)`, but XBlock 5.2.0 (Teak) removed the
+  `id_generator` argument, so each `<markdown/>` element raises
+  `TypeError: MarkdownXBlock.parse_xml() missing 1 required positional argument`.
+  `xmodule/vertical_block.py` catches that and only logs "Unable to load child when parsing
+  Vertical. Continuing...", so the import reports success while the blocks are discarded —
+  observed importing two courses beta → dev, where 10 markdown blocks became 0 and 35 became 0.
+  Only XML import is affected (`parse_xml` is not used for rendering, Studio editing or export),
+  so it bites on course import, course rerun, and any export/import round trip. Patches the
+  installed `html.py` at image-build time with a base64-embedded python script (same
+  `echo <b64> | base64 -d | python -` pattern as `ost2_handouts`) to make `id_generator`
+  optional and derive the resource path from `url_name`; upstream only used `id_generator` to
+  compute `base`, which is always the literal `markdown` directory, so it is behaviour
+  preserving. The script is idempotent and **fails the image build loudly** if its anchors ever
+  stop matching, rather than silently no-op'ing. Hook is **`openedx-dockerfile`**, *not*
+  `openedx-dockerfile-post-python-requirements` — the latter renders before the
+  `OPENEDX_EXTRA_PIP_REQUIREMENTS` loop that installs markdown-xblock, so the file would not
+  exist yet; `openedx-dockerfile` sits at the end of the `production` stage, after the venv
+  `COPY` and while `USER` is `app`, and `development`/`final` both derive `FROM production`.
+  Changes the image — needs `tutor images build openedx` + `tutor local start -d`. Belongs
+  upstream in hastexo/markdown-xblock; drop this plugin if a release ever supports XBlock 5.
 - **ost2_search_unreleased_for_staff** — let course staff search courses that have not started yet. edx-search's `SearchFilterGenerator.filter_dictionary()` hard-codes `{"start_date": DateRange(None, utcnow())}`, and `LmsSearchFilterGenerator` does not override it, so every block of a future-dated course is filtered out of search results — for staff and superusers too. OST2 uses a far-future start (typically 2030-01-01) as the “keep this course unreleased” sentinel, so those courses were silently unsearchable even though they were fully indexed (InstructorHowTo: 123 docs in Meilisearch, 36 matching “video”, `/search/` returned 0). **Reindexing does not fix this and never will.** Points `SEARCH_FILTER_GENERATOR` at a wrapper that delegates to the stock generator and drops *only* the `start_date` bound, and only for staff: with a `course_id`, for anyone holding `has_access(user, 'staff', course_key)` (course staff/instructor or global staff); without one, for global staff only. Learners keep the stock filter, so unreleased text cannot leak via the `/search/` endpoint; any error fails closed. Imports are deferred into method bodies because the settings module loads before `django.setup()`. Settings-only — `tutor config save` + `tutor local restart lms`.
 
 ## Deploy (per box)
@@ -166,7 +189,8 @@ done
 The `ost2_forum_sort_fix`, `ost2_authn_mfe_fork`, `ost2_authoring_mfe_fork`, and
 `ost2_discussions_mfe_fork` plugins pin MFE/forum forks that are baked at image build
 — changing those needs the corresponding `tutor images build` (mfe / openedx), not just
-a restart.
+a restart. `ost2_markdown_xblock_parse_xml` likewise patches a python package inside the
+`openedx` image, so it needs `tutor images build openedx` + `tutor local start -d`.
 
 ## Implementation notes
 
