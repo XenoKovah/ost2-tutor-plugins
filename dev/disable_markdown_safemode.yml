@@ -1,0 +1,32 @@
+# OST2: markdown-xblock (hastexo) hardcodes markdown2 safe_mode='replace', which strips
+# raw HTML and substitutes the literal text [HTML_REMOVED]. markdown2 defers the
+# fenced-code-blocks extra to Stage.LINK_DEFS when safe_mode is on (markdown2.py test()),
+# i.e. AFTER its HTML-hashing pass -- so ``` fences and 4-space code blocks do NOT protect
+# their contents. Original fix by Veronica, 2024. Re-enabled + corrected 2026-08-30.
+#
+# safe_mode: False (not 'escape') -- of 163 affected markdown blocks on dev, 143 use raw
+# HTML OUTSIDE any code fence (authored to render), so 'escape' would turn those into
+# visible tag soup. False is the only value that is correct for both cases.
+#
+# extras: pinned to markdown_xblock's own DEFAULT_EXTRAS. The 2024 revision of this file
+# also added header-ids / smarty-pants / strike / target-blank-links / wiki-tables /
+# tag-friendly / pyshell, which would have altered rendering of ALL 2402 markdown blocks
+# on this box (curly quotes, heading ids, every link forced to target=_blank).
+name: disable_markdown_safemode
+version: 0.2.0
+patches:
+  openedx-common-settings: |
+    try:
+        XBLOCK_SETTINGS
+    except NameError:
+        XBLOCK_SETTINGS = {}
+    XBLOCK_SETTINGS["markdown"] = {
+        "extras": [
+            "code-friendly",
+            "fenced-code-blocks",
+            "footnotes",
+            "tables",
+            "use-file-vars",
+        ],
+        "safe_mode": False,
+    }

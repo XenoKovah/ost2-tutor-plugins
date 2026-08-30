@@ -26,7 +26,7 @@ beta/     beta.ost2.fyi extras + beta-specific variants
 ```
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
-each box is exactly `common` (9) plus that box's directory — dev=17, p=15, beta=16,
+each box is exactly `common` (9) plus that box's directory — dev=19, p=15, beta=16,
 matching the live `tutor plugins list` on each. Contents were captured verbatim from
 the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
 md5-identical to what is deployed.
@@ -55,8 +55,9 @@ md5-identical to what is deployed.
 | ost2_default_grading_policy | ● | — | — | `dev/` |
 | ost2_communications_mfe_fork | ● | — | — | `dev/` (needs matching LMS branch) |
 | ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
+| disable_markdown_safemode | ● | ? | ○ | `dev/` |
 
-● enabled · ○ present but **disabled** · — not installed
+● enabled · ○ present but **disabled** · — not installed · ? not verified
 
 ### Per-box differences
 
@@ -71,6 +72,11 @@ md5-identical to what is deployed.
   `teak3_2_course-handouts-ui`. teak3_3 only drops the "New to Studio?" about blurb
   from the Studio home sidebar, so converging p is purely additive — bump the pin and
   rebuild the `mfe` image there.
+- **disable_markdown_safemode** — beta carries an untracked 2024 copy of this file that is
+  **disabled** and has the wrong payload (`safe_mode: False` but with the seven extra
+  markdown2 extras); it is not captured here. beta and p both still have the underlying
+  `[HTML_REMOVED]` bug — the fix is a copy of `dev/disable_markdown_safemode.yml` plus
+  `tutor plugins enable`. p's state was not verified (no SSH access at the time of writing).
 - **ost2_course_discovery_sort** — **dev runs a newer variant** (sorts the `/courses`
   catalog by course start date, then course title `content.display_name` as tie-break);
   p and beta run the older **start-only** variant. Converging p/beta to dev's version is
@@ -121,6 +127,24 @@ md5-identical to what is deployed.
   override with, so it now falls back to this default rather than the upstream one (a normal
   Studio export always writes that file). Settings-only —
   `tutor config save` + `tutor local restart lms cms lms-worker cms-worker`.
+- **disable_markdown_safemode** — stop the Markdown component from deleting raw HTML.
+  hastexo's markdown-xblock hardcodes markdown2 `safe_mode='replace'`, which replaces every
+  run of raw HTML with the literal string `[HTML_REMOVED]`, rewrites link hrefs it does not
+  like to `#`, and leaks `<!-- author notes -->` as visible page text. Code fences do **not**
+  protect their contents: with safe_mode on, markdown2 defers the `fenced-code-blocks` extra
+  to `Stage.LINK_DEFS`, i.e. *after* its HTML-hashing pass (`markdown2.py` `test()`; stages run
+  `PREPROCESS → HASH_HTML → LINK_DEFS`), so an HTML sample inside a triple-backtick fence — or in a
+  4-space code block — is eaten before the fence is ever recognised. Sets
+  `XBLOCK_SETTINGS["markdown"]`. **`safe_mode: False`, not `'escape'`**: of the 163 affected
+  blocks on dev only 20 had their HTML inside a fence — 143 used raw HTML *outside* one,
+  authored to render, which `escape` would turn into visible tag soup. The `extras` list is
+  pinned to markdown_xblock's own 5 `DEFAULT_EXTRAS`; an earlier 2024 revision of this file —
+  present on dev and beta but not enabled on either since the Teak cutover — also added header-ids / smarty-pants / strike / target-blank-links / wiki-tables
+  / tag-friendly / pyshell, which would have changed the rendering of all 2447 markdown blocks
+  on the box (curly quotes, heading ids, every link forced to `target=_blank`). Verified on dev
+  by rendering every markdown block before and after: `[HTML_REMOVED]` 164 → 0, 2190 of 2447
+  byte-identical, and no block lost content. Settings-only — `tutor config save` +
+  `tutor local restart lms cms lms-worker cms-worker`.
 - **ost2_search_unreleased_for_staff** — let course staff search courses that have not started yet. edx-search's `SearchFilterGenerator.filter_dictionary()` hard-codes `{"start_date": DateRange(None, utcnow())}`, and `LmsSearchFilterGenerator` does not override it, so every block of a future-dated course is filtered out of search results — for staff and superusers too. OST2 uses a far-future start (typically 2030-01-01) as the “keep this course unreleased” sentinel, so those courses were silently unsearchable even though they were fully indexed (InstructorHowTo: 123 docs in Meilisearch, 36 matching “video”, `/search/` returned 0). **Reindexing does not fix this and never will.** Points `SEARCH_FILTER_GENERATOR` at a wrapper that delegates to the stock generator and drops *only* the `start_date` bound, and only for staff: with a `course_id`, for anyone holding `has_access(user, 'staff', course_key)` (course staff/instructor or global staff); without one, for global staff only. Learners keep the stock filter, so unreleased text cannot leak via the `/search/` endpoint; any error fails closed. Imports are deferred into method bodies because the settings module loads before `django.setup()`. Settings-only — `tutor config save` + `tutor local restart lms`.
 
 ## Deploy (per box)
