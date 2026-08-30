@@ -26,7 +26,7 @@ beta/     beta.ost2.fyi extras + beta-specific variants
 ```
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
-each box is exactly `common` (9) plus that box's directory — dev=16, p=15, beta=16,
+each box is exactly `common` (9) plus that box's directory — dev=17, p=15, beta=16,
 matching the live `tutor plugins list` on each. Contents were captured verbatim from
 the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
 md5-identical to what is deployed.
@@ -52,6 +52,7 @@ md5-identical to what is deployed.
 | ost2_courses_hide_completed | ● | — | ● | `dev/`, `beta/` |
 | GoogleAnalytics4Plugin | ○ | ● | ● | per-box — GA id |
 | ost2_student_grade_lookup | ● | — | — | `dev/` (prototype) |
+| ost2_default_grading_policy | ● | — | — | `dev/` |
 | ost2_communications_mfe_fork | ● | — | — | `dev/` (needs matching LMS branch) |
 | ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
 
@@ -97,6 +98,25 @@ md5-identical to what is deployed.
 - **GoogleAnalytics4Plugin** — inject the GA4 tag id on the LMS + MFEs.
 - **ost2_student_grade_lookup** — staff-only `/admin/student-grade-lookup/` page: look up a learner by username/email/ID and list all enrollments + live grade % + certificate status (incl. certificate-exception flag); sortable columns; linked from the admin index.
 - **ost2_communications_mfe_fork** — repoint the communications (bulk email) MFE to the XenoKovah fork, which adds the "Don't send to" → "Students who completed the class." checkbox and a switch under the "Body" heading that turns the rich text editor into a plain textarea. The checkbox requires the edx-platform branch `teak3_12_bulk_email_exclude_completed`, which teaches the LMS the `exclude_completed` target; without it the LMS rejects the send with a 400. The plaintext switch is frontend-only. Changes an MFE image, so it needs an MFE rebuild, not just `tutor config save`.
+- **ost2_default_grading_policy** — a newly created course comes up with OST2's house
+  grading criteria instead of the Open edX stock one, and every new subsection is created
+  graded as **Progress Marker**. Assignment types become *Progress Marker* /
+  `ProgressMarker` (weight 100, total number 1, 0 droppable) and *Timing Feedback* /
+  `TimingFeedback` (weight 0, total number 1, 0 droppable); the Overall Grade Range becomes
+  Fail 0-99 / Pass 99-100 (`GRADE_CUTOFFS` `Pass` = 0.99). This is the setup documented in
+  the InstructorHowTo class (“Grading”), which until now had to be rebuilt by hand on every
+  new class. Works by mutating `xmodule.course_metadata_utils.DEFAULT_GRADING_POLICY` **in
+  place** — XBlock keeps that exact object as `CourseFields.grading_policy`'s `Field._default`
+  — in `openedx-common-settings`, so the CMS Grading page and LMS grade computation agree.
+  The subsection default wraps `contentstore…create_xblock.create_xblock` (the single funnel
+  for the legacy outline, the Authoring MFE, and the v0 CMS REST API) and calls the same
+  `CourseGradingModel.update_section_grader_type()` the “Grade as” dropdown does. It fires
+  only when the course's *own* policy defines a Progress Marker type, and reuses that
+  course's spelling of it (older classes use the no-space `ProgressMarker`), so a course
+  still on the stock Homework/Lab/Midterm/Final policy is left alone and no subsection can
+  get an assignment type its course does not define. Course *import* bypasses
+  `create_xblock`, so imported classes keep the grading in their OLX. Settings-only —
+  `tutor config save` + `tutor local restart lms cms lms-worker cms-worker`.
 - **ost2_search_unreleased_for_staff** — let course staff search courses that have not started yet. edx-search's `SearchFilterGenerator.filter_dictionary()` hard-codes `{"start_date": DateRange(None, utcnow())}`, and `LmsSearchFilterGenerator` does not override it, so every block of a future-dated course is filtered out of search results — for staff and superusers too. OST2 uses a far-future start (typically 2030-01-01) as the “keep this course unreleased” sentinel, so those courses were silently unsearchable even though they were fully indexed (InstructorHowTo: 123 docs in Meilisearch, 36 matching “video”, `/search/` returned 0). **Reindexing does not fix this and never will.** Points `SEARCH_FILTER_GENERATOR` at a wrapper that delegates to the stock generator and drops *only* the `start_date` bound, and only for staff: with a `course_id`, for anyone holding `has_access(user, 'staff', course_key)` (course staff/instructor or global staff); without one, for global staff only. Learners keep the stock filter, so unreleased text cannot leak via the `/search/` endpoint; any error fails closed. Imports are deferred into method bodies because the settings module loads before `django.setup()`. Settings-only — `tutor config save` + `tutor local restart lms`.
 
 ## Deploy (per box)
