@@ -11,6 +11,12 @@ from tutormfe.hooks import MFE_APPS
 # `false` (= "Oldest first"); learners can still toggle per-view via the
 # CommentsSort dropdown (the choice still does not persist).
 #
+# teak3_2_forum_shadow_mute descends from teak3_1_default-oldest-response-sort
+# and adds the learner-facing half of the per-course forum shadow-mute: the
+# moderator-only shadow-mute / un-shadow-mute entries in the post + comment
+# action menus, and the muted-author badge in AuthorLabel. The LMS half lives
+# in edx-platform teak3_16_forum_shadow_mute.
+#
 # teak3_1_default-oldest-response-sort = upstream release/teak.3 + that one
 # commit, i.e. the exact discussions source already built on ap.ost2.fyi plus the
 # default flip. All other OST2 discussions customizations -- the "(profile)"
@@ -24,6 +30,6 @@ from tutormfe.hooks import MFE_APPS
 @MFE_APPS.add()
 def _ost2_discussions_default_oldest_sort(mfes):
     mfes["discussions"]["repository"] = "https://github.com/XenoKovah/frontend-app-discussions.git"
-    mfes["discussions"]["version"] = "teak3_1_default-oldest-response-sort"
+    mfes["discussions"]["version"] = "teak3_2_forum_shadow_mute"
     mfes["discussions"]["refs"] = "https://api.github.com/repos/XenoKovah/frontend-app-discussions/git/refs/heads"
     return mfes
