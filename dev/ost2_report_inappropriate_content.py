@@ -37,6 +37,9 @@ import logging as _ost2_rp_logging
 _ost2_rp_log = _ost2_rp_logging.getLogger("ost2.report_user")
 
 _OST2_RP_TO = "xeno@ost2.fyi"
+# Real SMTP (rate-limited) path, used explicitly so reports are delivered even on dev,
+# where ost2_dev_mail_to_files redirects the DEFAULT backend to files.
+_OST2_RP_BACKEND = "openedx.core.lib.ost2_ratelimit_email_backend.RateLimitedEmailBackend"
 _OST2_RP_MAX_CHARS = 256
 _OST2_RP_MAX_PER_HOUR = 10
 
@@ -132,7 +135,7 @@ def _ost2_rp_view(request, username):
     from django.contrib.auth import get_user_model
     from django.contrib.auth.views import redirect_to_login
     from django.core.cache import cache
-    from django.core.mail import send_mail
+    from django.core.mail import get_connection, send_mail
     from django.conf import settings
     from django.http import Http404, HttpResponse
     from django.middleware.csrf import get_token
@@ -188,6 +191,7 @@ def _ost2_rp_view(request, username):
                     settings.DEFAULT_FROM_EMAIL,
                     [_OST2_RP_TO],
                     fail_silently=False,
+                    connection=get_connection(_OST2_RP_BACKEND),
                 )
                 _ost2_rp_log.info("report filed by %s against %s", request.user.username, target.username)
                 done = (
