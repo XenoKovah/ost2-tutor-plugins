@@ -105,7 +105,7 @@ def _ost2_rp_form(username, csrf, selected, other_checked, other_text, error):
     )
     body = (
         '<h1>Report inappropriate content</h1>'
-        '<p class="muted">Reporting account: <strong>@@USER@@</strong></p>'
+        '<p class="muted">Reporting user: <strong>@@USER@@</strong></p>'
         '@@ERR@@'
         '<form method="post" class="card">'
         '<input type="hidden" name="csrfmiddlewaretoken" value="@@CSRF@@">'
