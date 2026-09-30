@@ -86,7 +86,10 @@ def _ost2_rp_profile_url(request, username):
     base = getattr(settings, "PROFILE_MICROFRONTEND_URL", None)
     if not base:
         base = "https://apps." + request.get_host().split(":")[0] + "/profile"
-    return base.rstrip("/") + "/u/" + quote(username)
+    base = base.rstrip("/")
+    if base.endswith("/u"):
+        base = base[:-2]
+    return base + "/u/" + quote(username)
 
 
 def _ost2_rp_form(username, csrf, selected, other_checked, other_text, error):
