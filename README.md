@@ -57,6 +57,8 @@ md5-identical to what is deployed.
 | ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
 | disable_markdown_safemode | ● | ? | ○ | `dev/` |
 | ost2_markdown_xblock_parse_xml | ● | — | — | `dev/` — needs `tutor images build openedx` |
+| ost2_learning_mfe_fork | ● | — | — | `dev/` — Timing Feedback certificate nudge (`teak3_2_timing-feedback-nudge`); needs `tutor images build mfe` |
+| ost2_mfe_bookworm_base | ● | — | — | `dev/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`; p/beta get it on next sync-with-dev |
 
 ● enabled · ○ present but **disabled** · — not installed · ? not verified
 
