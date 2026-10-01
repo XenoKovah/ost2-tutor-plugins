@@ -16,7 +16,8 @@ unenroll from some of them.
                                                  patch on enrollment-alert/data/api.js) follows it
 
 "0% completion" = the same "Current grade: 0%" the learner dashboard shows for the course (the
-persisted grade, floored to a whole percent; no grade row counts as 0%). BlockCompletion is NOT used. Global staff/superusers are exempt, as are
+persisted grade, floored to a whole percent; no grade row counts as 0%), and a course with a downloadable certificate is never unstarted.
+BlockCompletion is NOT used. Global staff/superusers are exempt, as are
 requests where the learner is already enrolled in the target course. Anonymous requests pass through.
 
 LMS-only, no image rebuild: `tutor config save` + `tutor local restart lms`.
@@ -101,6 +102,12 @@ def ost2_unstarted_count(user):
     enrolled = [c for c in enrolled if c in existing]
     started = set(
         PersistentCourseGrade.objects.filter(user_id=user.id, course_id__in=enrolled, percent_grade__gte=0.01)
+        .values_list("course_id", flat=True)
+    )
+    # A downloadable certificate means the course was completed even if the persisted grade is 0.
+    from lms.djangoapps.certificates.models import GeneratedCertificate
+    started |= set(
+        GeneratedCertificate.objects.filter(user=user, course_id__in=enrolled, status="downloadable")
         .values_list("course_id", flat=True)
     )
     return len([c for c in enrolled if c not in started])
