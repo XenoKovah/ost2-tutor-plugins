@@ -102,19 +102,25 @@ def parse_record(line):
             return None
     if not isinstance(event, dict):
         return None
-    reasons = [
-        (item.get("label") or item.get("key") or "").strip()
-        for item in event.get("reasons") or []
-        if isinstance(item, dict)
-    ]
+    reasons, details = [], {}
+    for item in event.get("reasons") or []:
+        if not isinstance(item, dict):
+            continue
+        label = (item.get("label") or item.get("key") or "").strip()
+        if not label:
+            continue
+        reasons.append(label)
+        text = " ".join(str(item.get("details") or "").split())
+        if text:  # a reason that carries the learner's own words, e.g. "Something was broken"
+            details[label] = text
     other = (event.get("other") or "").strip()
-    reasons = [r for r in reasons if r]
     if not reasons and not other:
         return None
     return {
         "time": parse_time(record["time"]),
         "course_id": event.get("course_id") or record.get("context", {}).get("course_id") or "",
         "reasons": reasons,
+        "details": details,
         "other": other,
         "learner": record.get("context", {}).get("user_id") or record.get("username"),
     }
@@ -191,16 +197,20 @@ def render(responses, since, until, host):
     for course, n in sorted(by_course.items(), key=lambda item: (-item[1], item[0])):
         lines.append("  %*d  %s" % (width, n, course))
 
-    others = [r for r in responses if r["other"]]
-    if others:
-        lines += ["", "FREE-TEXT 'OTHER' ANSWERS", "-------------------------"]
-        for r in others:
+    written = [r for r in responses if r["details"] or r["other"]]
+    if written:
+        lines += ["", "FREE-TEXT ANSWERS", "-----------------"]
+        for r in written:
             lines.append("  [%s] %s" % (fmt_moment(r["time"]), course_label(r["course_id"])))
-            lines.append('    "%s"' % " ".join(r["other"].split()))
+            for label, text in r["details"].items():
+                lines.append('    %s: "%s"' % (label, text))
+            if r["other"]:
+                lines.append('    Other: "%s"' % " ".join(r["other"].split()))
 
     lines += ["", "ALL RESPONSES (oldest first)", "----------------------------"]
     for r in responses:
-        picked = list(r["reasons"])
+        picked = ["%s: %s" % (label, r["details"][label]) if label in r["details"] else label
+                  for label in r["reasons"]]
         if r["other"]:
             picked.append("Other: " + " ".join(r["other"].split()))
         lines.append("  %s  %s" % (fmt_moment(r["time"]), course_label(r["course_id"])))

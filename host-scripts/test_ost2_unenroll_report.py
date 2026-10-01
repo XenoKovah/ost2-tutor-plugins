@@ -39,6 +39,7 @@ def at(day, hour=12, minute=0):
 
 TIME = ("time", "I don't have the time")
 EASY = ("easy", "The course material was too easy")
+BROKEN = ("broken", "Something was broken")
 ZERO = ("zeroCompletion", "I needed to unenroll from a 0%-completion class to register for new classes")
 
 
@@ -49,6 +50,15 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(r["other"], "more")
         self.assertEqual(r["course_id"], COURSE)
         self.assertEqual(r["time"], at(1))
+
+    def test_reason_details_are_kept_per_label(self):
+        event = {"course_id": COURSE, "other": "", "reasons": [
+            {"key": "broken", "label": BROKEN[1], "details": "  video  would not\nplay "},
+            {"key": "time", "label": TIME[1]}]}
+        r = report.parse_record(log_line(at(1), event=event))
+        self.assertEqual(r["reasons"], [BROKEN[1], TIME[1]])
+        self.assertEqual(r["details"], {BROKEN[1]: "video would not play"})
+        self.assertEqual(report.parse_record(log_line(at(1), [TIME]))["details"], {})
 
     def test_other_names_and_junk_are_ignored(self):
         self.assertIsNone(report.parse_record(log_line(at(1), [TIME], name="edx.profile.viewed")))
@@ -138,6 +148,24 @@ class RenderTests(unittest.TestCase):
         self.assertIn("  3  Arch1001_x86-64_Asm (2021_v1)", body)
         self.assertIn('"needed the slot"', body)
         self.assertIn("      - Other: needed the slot", body)
+
+    def test_free_text_section_covers_broken_details_and_other(self):
+        event = {"course_id": COURSE, "other": "needed the slot", "reasons": [
+            {"key": "broken", "label": BROKEN[1], "details": "video would not play"}]}
+        r = report.parse_record(log_line(at(2), event=event))
+        subject, body = report.render([r], at(1, 8), at(8, 8), "dev.ost2.fyi")
+        self.assertIn("FREE-TEXT ANSWERS", body)
+        self.assertIn('    Something was broken: "video would not play"', body)
+        self.assertIn('    Other: "needed the slot"', body)
+        self.assertIn("      - Something was broken: video would not play", body)
+        self.assertIn("  1  Something was broken", body)  # still counted by plain label
+        self.assertIn("1 response from 1 learner, 2 reason selections in total.", body)
+
+    def test_broken_without_details_is_just_a_label(self):
+        r = report.parse_record(log_line(at(2), [BROKEN]))
+        _, body = report.render([r], at(1, 8), at(8, 8), "h")
+        self.assertNotIn("FREE-TEXT ANSWERS", body)
+        self.assertIn("      - Something was broken\n", body)
 
     def test_singular_wording(self):
         subject, body = report.render(self.responses()[:1], at(1, 8), at(8, 8), "h")
