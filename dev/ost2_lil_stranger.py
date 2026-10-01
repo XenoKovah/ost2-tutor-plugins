@@ -61,7 +61,7 @@ def _ost2_ls_page_view(request):
         '<h1>Li&#39;l Stranger says hello!</h1>'
         '<img src="/lil-stranger/hello.webp" alt="Hello from Li&#39;l Stranger">'
         '<p>Hi! I&#39;m Li&#39;l Stranger! I&#39;m the new OST2 mascot! I&#39;ll just be fiddling around in the '
-        'background on the site. Remember, just because you don&#39;t see me doesn&#39;t mean I&#39;m not there ;)</p>'
+        'background on the site. Remember, just because you don&#39;t see me doesn&#39;t mean I&#39;m not there. ;)</p>'
         '</main></body></html>'
     )
     return HttpResponse(html)
