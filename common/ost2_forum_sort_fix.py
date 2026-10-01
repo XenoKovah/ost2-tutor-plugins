@@ -14,6 +14,7 @@ from tutor import hooks
 # the site (it took ~32 s with ~4,500 users; now one CourseStat query), and (2) deleting a thread
 # or a response refreshes the course stats of every other user whose comments disappeared with it,
 # so the Learners tab no longer counts activity that no longer exists.
+# The default Learners list also hides users with no threads, responses or replies.
 #
 # Force-reinstall over the PyPI build because the fork keeps version 0.3.6, so a plain
 # requirement would be skipped by pip as "already satisfied". Pinned to the full commit SHA so
@@ -23,6 +24,6 @@ hooks.Filters.ENV_PATCHES.add_item(
         "openedx-dockerfile-post-python-requirements",
         'RUN pip install --force-reinstall --no-deps '
         '"git+https://github.com/XenoKovah/forum.git'
-        '@3e99fc97e58d2807bd065c6b3be86dc355527c46"',
+        '@077a08a1d5d8f70e238f5939c14c4914e90fc9f3"',
     )
 )
