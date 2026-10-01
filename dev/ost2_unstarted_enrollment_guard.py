@@ -15,8 +15,8 @@ unenroll from some of them.
                                                  "ost2_redirect"; the MFE (tutor-indigo build
                                                  patch on enrollment-alert/data/api.js) follows it
 
-"0% completion" = the learner has no BlockCompletion row with completion > 0 in that course
-(what the Progress tab's completion summary counts). Global staff/superusers are exempt, as are
+"0% completion" = the same "Current grade: 0%" the learner dashboard shows for the course (the
+persisted grade, floored to a whole percent; no grade row counts as 0%). BlockCompletion is NOT used. Global staff/superusers are exempt, as are
 requests where the learner is already enrolled in the target course. Anonymous requests pass through.
 
 LMS-only, no image rebuild: `tutor config save` + `tutor local restart lms`.
@@ -86,10 +86,12 @@ def _ost2_ue_image_view(request):
 
 
 def ost2_unstarted_count(user):
-    # Number of the user's active enrollments (in courses that still exist) with zero completion.
+    # Number of the user's active enrollments (in courses that still exist) whose current grade
+    # shows as 0% on the learner dashboard. Mirrors learner_home get_user_grade_percents: the
+    # PERSISTED grade (no grade row => 0%), floored to a whole percent.
     from common.djangoapps.student.models import CourseEnrollment
     from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
-    from completion.models import BlockCompletion
+    from lms.djangoapps.grades.models import PersistentCourseGrade
     enrolled = list(
         CourseEnrollment.objects.filter(user=user, is_active=True).values_list("course_id", flat=True)
     )
@@ -98,8 +100,8 @@ def ost2_unstarted_count(user):
     existing = set(CourseOverview.objects.filter(id__in=enrolled).values_list("id", flat=True))
     enrolled = [c for c in enrolled if c in existing]
     started = set(
-        BlockCompletion.objects.filter(user=user, context_key__in=enrolled, completion__gt=0)
-        .values_list("context_key", flat=True).distinct()
+        PersistentCourseGrade.objects.filter(user_id=user.id, course_id__in=enrolled, percent_grade__gte=0.01)
+        .values_list("course_id", flat=True)
     )
     return len([c for c in enrolled if c not in started])
 
