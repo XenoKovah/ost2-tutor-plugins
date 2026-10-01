@@ -23,7 +23,11 @@ common/   plugins byte-identical AND enabled on all three boxes
 dev/      dev.ost2.fyi extras + dev-specific variants
 p/        p.ost2.fyi   extras + p-specific variants
 beta/     beta.ost2.fyi extras + beta-specific variants
+host-scripts/  stdlib scripts run from cron on the Tutor HOST — NOT Tutor plugins
 ```
+
+> **Never copy `host-scripts/` into the Tutor plugins root** — Tutor imports every `*.py`
+> it finds there.
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
 each box is exactly `common` (9) plus that box's directory — dev=20, p=15, beta=16,
@@ -193,6 +197,42 @@ The `ost2_forum_sort_fix`, `ost2_authn_mfe_fork`, `ost2_authoring_mfe_fork`, and
 — changing those needs the corresponding `tutor images build` (mfe / openedx), not just
 a restart. `ost2_markdown_xblock_parse_xml` likewise patches a python package inside the
 `openedx` image, so it needs `tutor images build openedx` + `tutor local start -d`.
+
+## Host scripts (`host-scripts/`)
+
+### ost2_unenroll_report.py — weekly unenrollment-reasons email
+
+Emails the learner-dashboard "Why are you unenrolling?" survey answers collected since the
+last report (Sundays 08:00 UTC, to `xeno@ost2.fyi`). Needs the learner-dashboard MFE branch
+`teak3_2_unenroll-survey-multiselect`, which POSTs each submitted survey to the LMS `/event`
+endpoint so it lands in `tracking.log` as an `unenrollment_reason.selected` record. (Before
+that MFE is deployed nothing records these answers — the stock Segment tracker is a no-op
+because `SEGMENT_KEY` is empty.) Python 3 standard library only; reads SMTP settings
+(`SMTP_*`, `CONTACT_EMAIL`) from `~/tutor-venv/bin/tutor config printvalue`, so it sends
+through the same Gmail relay as the LMS. The email names courses and reasons only — no
+learner identity. It sends even when the week was empty, so silence means the job is broken.
+
+Window = end of the last successful report (`~/.local/share/ost2-unenroll-report/last_report_end`)
+→ now, so a missed week is caught up rather than lost; the first run covers 7 days. On a
+failure the marker is not advanced and `last_failure` is written next to it.
+
+Install on a box (then check the dry run before trusting the cron line):
+
+```
+mkdir -p ~/ost2-host-scripts ~/.local/share/ost2-unenroll-report
+cp host-scripts/ost2_unenroll_report.py ~/ost2-host-scripts/
+python3 ~/ost2-host-scripts/ost2_unenroll_report.py --to xeno@ost2.fyi --dry-run
+( crontab -l 2>/dev/null; echo '0 8 * * 0 /usr/bin/python3 /home/ubuntu/ost2-host-scripts/ost2_unenroll_report.py --to xeno@ost2.fyi >> /home/ubuntu/.local/share/ost2-unenroll-report/report.log 2>&1' ) | crontab -
+```
+
+Cron uses the box clock (UTC on dev). Send one now with the real SMTP path:
+`python3 ~/ost2-host-scripts/ost2_unenroll_report.py --to xeno@ost2.fyi --since 2026-01-01`
+(an explicit `--since` replays history and never moves the weekly marker). Tests:
+`cd host-scripts && python3 -m unittest -v test_ost2_unenroll_report`.
+
+Caveat: `tracking.log` is deliberately never rotated (see the `openedx-tutor` logrotate
+file), so on p it is tens of GB; the script pre-filters with `grep -F` so a run is a linear
+scan, not a parse. Per-box: install it separately on p and beta when those get the MFE.
 
 ## Implementation notes
 
