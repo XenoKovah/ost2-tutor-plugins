@@ -1,13 +1,13 @@
 """
 Tutor plugin: ost2_report_missing_accomplishments   (OST2)
 
-Backend for the "Report missing accomplishments" link on the gamma dashboard
+Backend for the "Report missing or incorrect accomplishments" link on the gamma dashboard
 (/gamma_dashboard/dashboard/). Adds a login-required LMS page
 
     https://<LMS_HOST>/report-missing-accomplishments/
 
 with a single free-text box ("Which accomplishments do you think you should already have
-received on the site, but which aren't showing up on the Your Accomplishments page?").
+received on the site, but which aren't showing up on the Your Accomplishments page? Or which do you think are assigned to you that shouldn't be?").
 Submitting emails the reporter, their profile link and the message to _OST2_RM_TO below,
 through the rate-limited SMTP backend. Same mechanism as ost2_report_missing_accomplishments:
 injected into the LMS production settings and mounted on the root urlconf on first request,
@@ -81,12 +81,13 @@ def _ost2_rm_profile_url(request, username):
 def _ost2_rm_form(csrf, text, error):
     from django.utils.html import escape
     body = (
-        '<h1>Report missing accomplishments</h1>'
+        '<h1>Report missing or incorrect accomplishments</h1>'
         '@@ERR@@'
         '<form method="post" class="card">'
         '<input type="hidden" name="csrfmiddlewaretoken" value="@@CSRF@@">'
         '<p style="margin-top:0"><label for="missing_text"><strong>Which accomplishments do you think you should already have '
-        'received on the site, but which aren&#39;t showing up on the Your Accomplishments page?</strong> '
+        'received on the site, but which aren&#39;t showing up on the Your Accomplishments page? '
+        'Or which do you think are assigned to you that shouldn&#39;t be?</strong> '
         '<span class="muted">(up to @@MAX@@ characters)</span></label></p>'
         '<textarea id="missing_text" name="missing_text" rows="8" maxlength="@@MAX@@" required>@@TEXT@@</textarea>'
         '<button type="submit">Submit</button>'
@@ -148,7 +149,7 @@ def _ost2_rm_view(request):
                 return HttpResponse(_ost2_rm_shell("Report sent", done))
 
     body = _ost2_rm_form(get_token(request), text, error)
-    resp = HttpResponse(_ost2_rm_shell("Report missing accomplishments", body), status=400 if error else 200)
+    resp = HttpResponse(_ost2_rm_shell("Report missing or incorrect accomplishments", body), status=400 if error else 200)
     resp["Cache-Control"] = "no-store"
     return resp
 
