@@ -62,6 +62,7 @@ md5-identical to what is deployed.
 | disable_markdown_safemode | ● | ? | ○ | `dev/` |
 | ost2_markdown_xblock_parse_xml | ● | — | — | `dev/` — needs `tutor images build openedx` |
 | ost2_learning_mfe_fork | ● | — | — | `dev/` — Timing Feedback certificate nudge (`teak3_2_timing-feedback-nudge`); needs `tutor images build mfe` |
+| ost2_learner_dashboard_mfe_fork | ● | — | — | `dev/` — learner-dashboard fork `teak3_3_ost2-dashboard-customizations` (multi-select unenroll survey + current-grade banners + header labels); needs `tutor images build mfe` and a tutor-indigo without the old learner-dashboard patches |
 | ost2_mfe_bookworm_base | ● | — | — | `dev/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`; p/beta get it on next sync-with-dev |
 
 ● enabled · ○ present but **disabled** · — not installed · ? not verified
@@ -111,6 +112,7 @@ md5-identical to what is deployed.
 - **GoogleAnalytics4Plugin** — inject the GA4 tag id on the LMS + MFEs.
 - **ost2_student_grade_lookup** — staff-only `/admin/student-grade-lookup/` page: look up a learner by username/email/ID and list all enrollments + live grade % + certificate status (incl. certificate-exception flag); sortable columns; linked from the admin index.
 - **ost2_communications_mfe_fork** — repoint the communications (bulk email) MFE to the XenoKovah fork, which adds the "Don't send to" → "Students who completed the class." checkbox and a switch under the "Body" heading that turns the rich text editor into a plain textarea. The checkbox requires the edx-platform branch `teak3_12_bulk_email_exclude_completed`, which teaches the LMS the `exclude_completed` target; without it the LMS rejects the send with a 400. The plaintext switch is frontend-only. Changes an MFE image, so it needs an MFE rebuild, not just `tutor config save`.
+- **ost2_learner_dashboard_mfe_fork** — repoint the learner-dashboard MFE to the XenoKovah fork branch `teak3_3_ost2-dashboard-customizations` (upstream `release/teak.3` + the multi-select unenroll survey and its tracking-log write, which feeds `host-scripts/ost2_unenroll_report.py`, + the "Current grade: N%" banners and "My Enrolled Courses" / "Discover New Courses" header labels that used to be tutor-indigo build patches). **Pair it with a tutor-indigo that no longer carries those patches** (their guard greps would fail the build); a box that does not pin this fork needs the patches. Changes an MFE image, so it needs an MFE rebuild.
 - **ost2_default_grading_policy** — a newly created course comes up with OST2's house
   grading criteria instead of the Open edX stock one, and every new subsection is created
   graded as **Progress Marker**. Assignment types become *Progress Marker* /
