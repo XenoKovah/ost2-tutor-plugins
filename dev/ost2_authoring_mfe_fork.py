@@ -3,7 +3,7 @@ Tutor plugin: ost2_authoring_mfe_fork
 
 Build the Course Authoring MFE (frontend-app-authoring) from the OST2 fork
 instead of stock openedx, so the Studio customizations are carried in forked
-SOURCE -- XenoKovah/frontend-app-authoring @ teak3_7_remove-section-highlights
+SOURCE -- XenoKovah/frontend-app-authoring @ teak3_8_studio-dark-toggle
 (a descendant of teak3_1_course-live-disable-fix, itself branched from the
 release/teak.3 tag) -- rather than build-time seds.
 
@@ -19,8 +19,10 @@ the course-outline docs at docs.openedx.org (the CMS help token still points at
 the retired edx.readthedocs.io project), and stop TinyMCE's load-time
 reformatting from arming "You've made some changes" on Schedule & Details.
 teak3_7 = drop the per-section "Section highlights" button (no toggle exists
-for it upstream).
-dev leads on teak3_7; beta is on teak3_5 and p on teak3_2.
+for it upstream). teak3_8 = Indigo light/dark theme toggle in the Studio
+header (same cookie as the rest of the site) plus the Indigo dark styles;
+the unit preview iframe side lives in tutor-indigo.
+dev leads on teak3_8; beta is on teak3_5 and p on teak3_2.
 
 BUILD-WIRING plugin only: it repoints the authoring MFE's git source via
 tutor-mfe's MFE_APPS filter. It does NOT patch source. After enabling:
@@ -30,10 +32,10 @@ tutor-mfe's MFE_APPS filter. It does NOT patch source. After enabling:
 """
 from tutormfe.hooks import MFE_APPS
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 _REPOSITORY = "https://github.com/XenoKovah/frontend-app-authoring.git"
-_VERSION = "teak3_7_remove-section-highlights"
+_VERSION = "teak3_8_studio-dark-toggle"
 
 
 @MFE_APPS.add()
