@@ -3,7 +3,7 @@ Tutor plugin: ost2_authoring_mfe_fork
 
 Build the Course Authoring MFE (frontend-app-authoring) from the OST2 fork
 instead of stock openedx, so the Studio customizations are carried in forked
-SOURCE -- XenoKovah/frontend-app-authoring @ teak3_8_studio-dark-toggle
+SOURCE -- XenoKovah/frontend-app-authoring @ teak3_9_add-component-menu
 (a descendant of teak3_1_course-live-disable-fix, itself branched from the
 release/teak.3 tag) -- rather than build-time seds.
 
@@ -21,8 +21,10 @@ reformatting from arming "You've made some changes" on Schedule & Details.
 teak3_7 = drop the per-section "Section highlights" button (no toggle exists
 for it upstream). teak3_8 = Indigo light/dark theme toggle in the Studio
 header (same cookie as the rest of the site) plus the Indigo dark styles;
-the unit preview iframe side lives in tutor-indigo.
-dev leads on teak3_8; beta is on teak3_5 and p on teak3_2.
+the unit preview iframe side lives in tutor-indigo. teak3_9 = unit page
+"Add a new component" menu: Markdown, Text, Video, Problem, Discussion,
+Advanced (everything else moved into the alphabetical Advanced dialog).
+dev leads on teak3_9; beta is on teak3_5 and p on teak3_2.
 
 BUILD-WIRING plugin only: it repoints the authoring MFE's git source via
 tutor-mfe's MFE_APPS filter. It does NOT patch source. After enabling:
@@ -32,10 +34,10 @@ tutor-mfe's MFE_APPS filter. It does NOT patch source. After enabling:
 """
 from tutormfe.hooks import MFE_APPS
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 
 _REPOSITORY = "https://github.com/XenoKovah/frontend-app-authoring.git"
-_VERSION = "teak3_8_studio-dark-toggle"
+_VERSION = "teak3_9_add-component-menu"
 
 
 @MFE_APPS.add()
