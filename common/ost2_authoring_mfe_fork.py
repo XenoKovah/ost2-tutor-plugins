@@ -24,7 +24,7 @@ header (same cookie as the rest of the site) plus the Indigo dark styles;
 the unit preview iframe side lives in tutor-indigo. teak3_9 = unit page
 "Add a new component" menu: Markdown, Text, Video, Problem, Discussion,
 Advanced (everything else moved into the alphabetical Advanced dialog).
-dev leads on teak3_9; beta is on teak3_5 and p on teak3_2.
+All three boxes (dev, beta, p) run teak3_9 as of 2026-10-05.
 
 BUILD-WIRING plugin only: it repoints the authoring MFE's git source via
 tutor-mfe's MFE_APPS filter. It does NOT patch source. After enabling:
