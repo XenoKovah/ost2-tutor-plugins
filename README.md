@@ -30,7 +30,7 @@ host-scripts/  stdlib scripts run from cron on the Tutor HOST — NOT Tutor plug
 > it finds there.
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
-each box is exactly `common` (9) plus that box's directory — dev=20, p=15, beta=16,
+each box is exactly `common` (12) plus that box's directory — dev=22, p=17, beta=18,
 matching the live `tutor plugins list` on each. Contents were captured verbatim from
 the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
 md5-identical to what is deployed.
@@ -49,6 +49,8 @@ md5-identical to what is deployed.
 | password_policy | ● | ● | ● | `common/` |
 | registration_custom_fields | ● | ● | ● | `common/` |
 | enable_instructor_certificate_management | ● | ● | ● | `common/` |
+| ost2_gamification_faq_static | ● | ● | ● | `common/` |
+| ost2_lil_stranger_other_hosts | ● | ● | ● | `common/` — needs ost2_lil_stranger + ost2_mfe_media_proxy |
 | ost2_course_discovery_sort | ● | ● | ● | per-box — **differs** |
 | ost2_discussions_mfe_fork | ● | ● | ● | per-box — host |
 | ost2_forum_profile_links | ● | ● | ● | per-box — host |
@@ -104,6 +106,8 @@ md5-identical to what is deployed.
 - **password_policy** — `AUTH_PASSWORD_VALIDATORS` (min length 18, no complexity, max 128) + longer generated passwords so OAuth signups don't 400.
 - **registration_custom_fields** — custom registration fields (only AGE required).
 - **enable_instructor_certificate_management** — show the instructor-dashboard **Certificates** tab (`/courses/<id>/instructor#view-certificates`) to course-team **Admins** (`CourseInstructorRole`), not only to global site staff. Sets `FEATURES["ENABLE_CERTIFICATES_INSTRUCTOR_MANAGE"] = True`, because `instructor_dashboard.py` gates that section on `access['admin']`, which is Django's site-wide `request.user.is_staff` despite the name. The certificate endpoints in `instructor/permissions.py` are already `is_staff | HasAccessRule('instructor')`, so this only reveals UI the course Admin was already authorized to use — it does not widen who may call those endpoints. Effect is per-course (only where they hold Admin). Does **not** enable the bulk Generate/Regenerate panel — that is a separate flag, `CERTIFICATES_INSTRUCTOR_GENERATION`, left off.
+- **ost2_gamification_faq_static** — serve the Gamification FAQ screenshots at `/GamificationFAQ/<file>` on the LMS, Studio and `apps.*` hosts, so course markdown can use `![](/GamificationFAQ/x.jpg)`. The images are not in the plugin: they live in the LMS media volume, `$(tutor config printroot)/data/openedx-media/GamificationFAQ/`, and Caddy rewrites `/GamificationFAQ/*` to `/media/GamificationFAQ/*` (the `apps.*` host reaches `/media` through `ost2_mfe_media_proxy`). Adding an image is just copying it into that directory. Caddy-only — `tutor config save` + `caddy reload` in the caddy and mfe containers, no restart.
+- **ost2_lil_stranger_other_hosts** — reverse-proxy `/lil-stranger*` (served by the LMS via `ost2_lil_stranger`) from the Studio and `apps.*` hosts to the LMS, so relative `/lil-stranger/<img>` URLs render in Studio previews and MFE-rendered content. Caddy-only, like the above.
 - **ost2_course_discovery_sort** — sort the `/courses` discovery catalog (oldest start first; +title tie-break on dev).
 - **ost2_discussions_mfe_fork** — repoint the discussions MFE to the XenoKovah fork (default Oldest-first sort, etc.).
 - **ost2_forum_profile_links** — make forum `/u/<name>` author links resolve to the profile MFE (`PROFILE_MFE_BASE`).
