@@ -1,4 +1,7 @@
 """
+DEV COPY: pins teak3_5_timing-feedback-midclass-nudge, same as beta. The mid-class Timing Feedback
+nudge in it stays OFF here: only beta installs ost2_timing_feedback_midclass_nudge (its MFE_CONFIG flag).
+
 Point the Learning MFE build at the OST2 fork branch that adds the Timing Feedback
 nudge to the certificate boxes (course home alert + progress-tab card) when a learner
 submitted some but not all Timing Feedback subsections.
@@ -17,7 +20,7 @@ from tutormfe.hooks import MFE_APPS
 __version__ = "0.1.0"
 
 _REPOSITORY = "https://github.com/XenoKovah/frontend-app-learning.git"
-_VERSION = "teak3_4_progress-timing-feedback-rows"
+_VERSION = "teak3_5_timing-feedback-midclass-nudge"
 
 
 @MFE_APPS.add()

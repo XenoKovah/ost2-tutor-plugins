@@ -63,7 +63,7 @@ md5-identical to what is deployed.
 | ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
 | disable_markdown_safemode | ● | ? | ○ | `dev/` |
 | ost2_markdown_xblock_parse_xml | ● | — | — | `dev/` — needs `tutor images build openedx` |
-| ost2_learning_mfe_fork | ● | — | ● | per-box — **differs**: dev `teak3_4_progress-timing-feedback-rows`, beta `teak3_5_timing-feedback-midclass-nudge`; needs `tutor images build mfe` |
+| ost2_learning_mfe_fork | ● | — | ● | `dev/`, `beta/` — both `teak3_5_timing-feedback-midclass-nudge` (mid-class nudge only active where the flag plugin is); needs `tutor images build mfe` |
 | ost2_timing_feedback_midclass_nudge | — | — | ● | `beta/` only — MFE_CONFIG flag for the mid-class Timing Feedback nudge (TF is mandatory on beta); never on dev/p |
 | ost2_learner_dashboard_mfe_fork | ● | — | — | `dev/` — learner-dashboard fork `teak3_3_ost2-dashboard-customizations` (multi-select unenroll survey + current-grade banners + header labels); needs `tutor images build mfe` and a tutor-indigo without the old learner-dashboard patches |
 | ost2_mfe_bookworm_base | ● | — | — | `dev/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`; p/beta get it on next sync-with-dev |
