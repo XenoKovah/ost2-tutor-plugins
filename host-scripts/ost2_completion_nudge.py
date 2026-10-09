@@ -15,8 +15,9 @@ A learner is nudged about a class when ALL of these hold:
   * if the class has other runs (same display name), they have no certificate, no pass and no
     recent activity in any of them either.
 
-The email is the "Li'l Stranger nudge": mascot image on top, links to the class and its Progress
-page, and to this server's Accomplishments and Leaderboard pages, then a course-email footer
+The email is the "Li'l Stranger nudge": the platform logo in the same light-gray header band as
+normal course emails, then the mascot image, links to the class and its Progress page, and to this
+server's Accomplishments and Leaderboard pages, then a course-email footer
 (why they got it, and a one-click per-class "unsubscribe").
 Each learner is nudged about a class at most once, ever (ledger below), and at most once every
 --min-days-between days across classes.
@@ -65,7 +66,7 @@ delivering, and the ledger stays untouched.  To really deliver one test email fr
 
 Other rails: --max-send caps one run (default 100), closest-to-done and most-recently-active
 learners go first so a big backlog drains over several days, and the mascot image must be
-reachable (HEAD check) before anything is sent.  The ledger (<state-dir>/sent.jsonl, one JSON
+reachable (HEAD check, mascot and logo) before anything is sent.  The ledger (<state-dir>/sent.jsonl, one JSON
 line per delivered message, learner ids only) is what makes reruns and missed days harmless.
 Running out of budget (daily cap, yield, Gmail quota/throttle) is a normal early stop (exit 0);
 authentication/network/route problems leave <state-dir>/last_failure and exit 1.
@@ -100,6 +101,8 @@ DEFAULT_MAX_RUNTIME = 1800
 DEFAULT_MIN_DAYS_BETWEEN = 7
 IMAGE_WIDTH = 300  # CSS pixels; the PNG itself is 2x for high-DPI screens
 IMAGE_PATH = "/media/lil-stranger/hello.png"  # served by the LMS media volume, no restart needed
+LOGO_PATH = "/theming/asset/images/logo.png"  # the logo course emails use (LMS default for emails)
+LOGO_WIDTH, LOGO_HEIGHT = 162, 65  # the 250x100 logo at the same 65 px height course emails give it
 ACCOMPLISHMENTS_PATH = "/gamma_dashboard/dashboard/"  # LMS routes from edx-gamma-dashboard
 LEADERBOARD_PATH = "/gamma_dashboard/leaderboard/"
 UNSUBSCRIBE_SENTINEL = "@@OST2-UNSUBSCRIBE-URL@@"  # swapped for the per-recipient link by the agent
@@ -418,6 +421,14 @@ def render_html(class_name, urls, image_url, platform_name, recipient):
         '<img src="%s" width="%d" alt="Li\'l Stranger waving hello" '
         'style="display:block;margin:0 auto;width:%dpx;max-width:100%%;height:auto;border:0;">'
         "</div>" % (html.escape(image_url, quote=True), IMAGE_WIDTH, IMAGE_WIDTH))
+    # the header band normal course emails have (ace_common base_body.html): logo on #f5f5f5, linked home
+    header = (
+        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" '
+        'bgcolor="#f5f5f5" style="background-color:#f5f5f5;"><tr><td align="left" style="padding:10px 20px;">'
+        '<a href="%s"><img src="%s" width="%d" height="%d" alt="%s" '
+        'style="display:block;border:0;width:%dpx;height:%dpx;max-height:%dpx;"></a></td></tr></table>' % (
+            html.escape(urls["site"], quote=True), html.escape(urls["logo"], quote=True), LOGO_WIDTH, LOGO_HEIGHT,
+            html.escape("Go to %s Home Page" % platform_name, quote=True), LOGO_WIDTH, LOGO_HEIGHT, LOGO_HEIGHT))
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
@@ -426,10 +437,11 @@ def render_html(class_name, urls, image_url, platform_name, recipient):
         '<meta name="supported-color-schemes" content="light dark">'
         "<title>%s</title></head>\n"
         '<body style="margin:0;padding:0;">\n'
-        '<div style="max-width:600px;margin:0 auto;padding:16px;'
+        '<div style="max-width:600px;margin:0 auto;">\n%s\n'
+        '<div style="padding:16px;'
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;"
-        'font-size:16px;line-height:1.5;">\n%s\n%s\n</div>\n</body></html>\n'
-        % (esc(SUBJECT.format(class_name=class_name)), image, "\n".join(body)))
+        'font-size:16px;line-height:1.5;">\n%s\n%s\n</div>\n</div>\n</body></html>\n'
+        % (esc(SUBJECT.format(class_name=class_name)), header, image, "\n".join(body)))
 
 
 def course_urls(mfe_base, course_id):
@@ -447,7 +459,8 @@ def email_urls(cfg, course_id):
     home, progress = course_urls(cfg["mfe_base"], course_id)
     lms = cfg["lms_base"].rstrip("/")
     return {"home": home, "progress": progress, "accomplishments": lms + ACCOMPLISHMENTS_PATH,
-            "leaderboard": lms + LEADERBOARD_PATH, "unsubscribe": UNSUBSCRIBE_SENTINEL}
+            "leaderboard": lms + LEADERBOARD_PATH, "site": lms + "/", "logo": cfg["logo_url"],
+            "unsubscribe": UNSUBSCRIBE_SENTINEL}
 
 
 def render_message(cfg, candidate, recipient, test=False):
@@ -810,15 +823,15 @@ def run_agent(args, payload):
 
 
 def check_image(url, timeout=20):
-    """Never mail hundreds of learners a broken picture."""
+    """Never mail hundreds of learners a broken picture (follows redirects: the logo URL is one)."""
     request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "ost2-completion-nudge"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             kind = response.headers.get("Content-Type", "")
             if response.status != 200 or not kind.startswith("image/"):
-                raise RuntimeError("mascot image check: %s -> HTTP %s, %r" % (url, response.status, kind))
+                raise RuntimeError("image check: %s -> HTTP %s, %r" % (url, response.status, kind))
     except urllib.error.URLError as exc:
-        raise RuntimeError("mascot image %s is not reachable (%s); install hello.png first" % (url, exc))
+        raise RuntimeError("image %s is not reachable (%s); the mascot needs hello.png installed" % (url, exc))
 
 
 def record_failure(state_dir, text):
@@ -861,6 +874,7 @@ def load_config(args):
         "lms_base": args.lms_url or "%s://%s" % (scheme, lms_host),
         "mfe_base": args.mfe_url or "%s://%s" % (scheme, mfe_host),
         "image_url": args.image_url or "%s://%s%s" % (scheme, lms_host, IMAGE_PATH),
+        "logo_url": args.logo_url or "%s://%s%s" % (scheme, lms_host, LOGO_PATH),
         "sender": args.sender or get("CONTACT_EMAIL"),
         "sender_name": get("PLATFORM_NAME") or "OpenSecurityTraining2",
         "mysql_password": get("MYSQL_ROOT_PASSWORD"),
@@ -1010,6 +1024,7 @@ def run(args):
             return 0
         if not args.skip_image_check:
             check_image(cfg["image_url"])
+            check_image(cfg["logo_url"])
 
         result = send_batch(args, cfg, plan, mode, ledger, now)
         summary = result["summary"]
@@ -1065,7 +1080,10 @@ def parser():
                     "links, e.g. https://p.ost2.fyi")
     ap.add_argument("--mfe-url", help="override the MFE base, e.g. https://apps.p.ost2.fyi")
     ap.add_argument("--image-url", help="override the mascot PNG URL (default <LMS_HOST>%s)" % IMAGE_PATH)
-    ap.add_argument("--skip-image-check", action="store_true", help="do not HEAD-check the mascot image first")
+    ap.add_argument("--logo-url", help="override the header logo URL (default <LMS_HOST>%s, the logo "
+                    "course emails use)" % LOGO_PATH)
+    ap.add_argument("--skip-image-check", action="store_true", help="do not HEAD-check the mascot image and "
+                    "logo first")
     ap.add_argument("--sender", help="From address (default: tutor CONTACT_EMAIL)")
     ap.add_argument("--mail-backend", metavar="DOTTED.PATH",
                     help="TEST only: use this Django mail backend instead of the box's own route")

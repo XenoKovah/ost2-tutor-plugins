@@ -22,10 +22,13 @@ ACCOMPLISHMENTS = "https://p.ost2.fyi/gamma_dashboard/dashboard/"
 LEADERBOARD = "https://p.ost2.fyi/gamma_dashboard/leaderboard/"
 SENTINEL = nudge.UNSUBSCRIBE_SENTINEL
 IMAGE = "https://p.ost2.fyi/media/lil-stranger/hello.png"
+LOGO = "https://p.ost2.fyi/theming/asset/images/logo.png"
+SITE = "https://p.ost2.fyi/"
 URLS = {"home": HOME, "progress": PROGRESS, "accomplishments": ACCOMPLISHMENTS, "leaderboard": LEADERBOARD,
-        "unsubscribe": SENTINEL}
+        "site": SITE, "logo": LOGO, "unsubscribe": SENTINEL}
 CFG = {"lms_base": "https://p.ost2.fyi", "mfe_base": "https://apps.p.ost2.fyi", "image_url": IMAGE,
-       "sender": "info@ost2.fyi", "sender_name": "OpenSecurityTraining2", "lms_host": "p.ost2.fyi"}
+       "logo_url": LOGO, "sender": "info@ost2.fyi", "sender_name": "OpenSecurityTraining2",
+       "lms_host": "p.ost2.fyi"}
 
 
 def cand(user_id=1, course=ARCH1005, name=ARCH1005_NAME, percent=0.92, days=30, email=None, username=None):
@@ -77,16 +80,27 @@ class RenderTests(unittest.TestCase):
         self.assertLess(page.index("Li'l Stranger</p>"), page.index("This email was automatically sent"),
                         "the footer comes after the sign-off")
 
-    def test_every_link_in_the_html_is_one_of_the_expected_six(self):
+    def test_every_link_in_the_html_is_one_of_the_expected_seven(self):
         hrefs = [chunk.split('"')[0] for chunk in self.html().split('<a href="')[1:]]
-        self.assertEqual(hrefs, [HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD, HOME, SENTINEL])
+        self.assertEqual(hrefs, [SITE, HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD, HOME, SENTINEL])
 
-    def test_mascot_is_the_first_thing_in_the_body_and_300_wide(self):
+    def test_the_header_band_has_the_platform_logo_like_course_emails(self):
         page = self.html()
-        self.assertLess(page.index("<img "), page.index("Hi! We see"))
+        band = page[page.index("<table"):page.index("</table>")]
+        self.assertIn('bgcolor="#f5f5f5"', band)
+        self.assertIn('<a href="%s"><img src="%s" width="162" height="65" alt="Go to OpenSecurityTraining2 Home Page"'
+                      % (SITE, LOGO), band)
+        self.assertIn("max-height:65px", band)
+        self.assertLess(page.index(LOGO), page.index(IMAGE), "the logo band is above the mascot")
+        self.assertLess(page.index(LOGO), page.index("Hi! We see"))
+
+    def test_the_mascot_follows_the_logo_band_and_is_300_wide(self):
+        page = self.html()
+        self.assertLess(page.index(IMAGE), page.index("Hi! We see"))
         self.assertIn('<img src="%s" width="300"' % IMAGE, page)
         self.assertIn("width:300px", page)
-        self.assertEqual(page.count("<img "), 1)
+        self.assertEqual(page.count("<img "), 2, "the logo and the mascot, nothing else")
+        self.assertNotIn(LOGO, page.split("Hi! We see")[1], "the logo is only in the header")
 
     def test_class_names_and_recipients_are_html_escaped(self):
         page = self.html("Attack & Defense <b>", recipient="a&b@example.com")
@@ -136,12 +150,15 @@ class RenderTests(unittest.TestCase):
 
     def test_links_are_built_from_each_boxs_own_hosts(self):
         dev = dict(CFG, lms_base="https://dev.ost2.fyi/", mfe_base="https://apps.dev.ost2.fyi",
-                   image_url="https://dev.ost2.fyi/media/lil-stranger/hello.png")
+                   image_url="https://dev.ost2.fyi/media/lil-stranger/hello.png",
+                   logo_url="https://dev.ost2.fyi/theming/asset/images/logo.png")
         self.assertEqual(nudge.email_urls(dev, ARCH1005), {
             "home": "https://apps.dev.ost2.fyi/learning/course/%s/home" % ARCH1005,
             "progress": "https://apps.dev.ost2.fyi/learning/course/%s/progress" % ARCH1005,
             "accomplishments": "https://dev.ost2.fyi/gamma_dashboard/dashboard/",
-            "leaderboard": "https://dev.ost2.fyi/gamma_dashboard/leaderboard/", "unsubscribe": SENTINEL})
+            "leaderboard": "https://dev.ost2.fyi/gamma_dashboard/leaderboard/",
+            "site": "https://dev.ost2.fyi/", "logo": "https://dev.ost2.fyi/theming/asset/images/logo.png",
+            "unsubscribe": SENTINEL})
         self.assertEqual(nudge.email_urls(CFG, ARCH1005), URLS)
         item = nudge.render_message(dev, cand(), "x@example.com")
         self.assertNotIn("p.ost2.fyi", item["html"] + item["text"], "a dev email must not point at p")
@@ -878,7 +895,8 @@ class RunTests(unittest.TestCase):
         self.assertIn("learner1@example.com", payload["items"][0]["html"], "the footer shows where it was sent")
         self.assertEqual([(e["user_id"], e["status"]) for e in self.ledger()], [(1, "sent"), (2, "sent"), (3, "sent")])
         self.assertIn("done: sent=3 refused=0 skipped=0 backlog_left=0 server_sent_today=14/1800", out)
-        self.check_image.assert_called_once()
+        self.assertEqual(self.check_image.call_args_list,
+                         [mock.call(IMAGE), mock.call(LOGO)], "the mascot and the logo are both checked")
 
     def test_the_run_options_reach_the_agent(self):
         self.go("--send", "--delay", "3.5", "--yield-above", "0.25", "--max-runtime", "600")
@@ -955,6 +973,17 @@ class RunTests(unittest.TestCase):
             self.go("--send")
         self.assertEqual((self.agent.payloads, self.ledger()), ([], []))
 
+    def test_a_missing_logo_blocks_every_send_too(self):
+        self.check_image.side_effect = [None, RuntimeError("logo is not reachable")]
+        with self.assertRaises(RuntimeError):
+            self.go("--send")
+        self.assertEqual((self.agent.payloads, self.ledger()), ([], []))
+
+    def test_the_header_logo_reaches_the_agent_in_the_html(self):
+        self.go("--send")
+        html_part = self.agent.payloads[0]["items"][0]["html"]
+        self.assertIn('<img src="%s" width="162" height="65"' % LOGO, html_part)
+
     def test_send_and_only_to_cannot_be_combined(self):
         with self.assertRaises(SystemExit):
             self.go("--send", "--only-to", "xeno@ost2.fyi")
@@ -967,15 +996,18 @@ class RunTests(unittest.TestCase):
 
     def test_config_comes_from_the_boxs_own_settings_and_overrides_win(self):
         cfg = nudge.load_config(nudge.parser().parse_args([]))
-        self.assertEqual((cfg["lms_base"], cfg["mfe_base"], cfg["image_url"], cfg["sender"]),
+        self.assertEqual((cfg["lms_base"], cfg["mfe_base"], cfg["image_url"], cfg["logo_url"], cfg["sender"]),
                          ("https://p.ost2.fyi", "https://apps.p.ost2.fyi",
-                          "https://p.ost2.fyi/media/lil-stranger/hello.png", "info@ost2.fyi"))
+                          "https://p.ost2.fyi/media/lil-stranger/hello.png",
+                          "https://p.ost2.fyi/theming/asset/images/logo.png", "info@ost2.fyi"))
         self.assertNotIn("smtp", cfg, "the host script never touches SMTP or its password any more")
         args = nudge.parser().parse_args(["--lms-url", "https://x.test", "--mfe-url", "https://apps.x.test",
-                                          "--image-url", "https://x.test/a.png", "--sender", "me@x.test"])
+                                          "--image-url", "https://x.test/a.png", "--logo-url", "https://x.test/l.png",
+                                          "--sender", "me@x.test"])
         cfg = nudge.load_config(args)
-        self.assertEqual((cfg["lms_base"], cfg["mfe_base"], cfg["image_url"], cfg["sender"]),
-                         ("https://x.test", "https://apps.x.test", "https://x.test/a.png", "me@x.test"))
+        self.assertEqual((cfg["lms_base"], cfg["mfe_base"], cfg["image_url"], cfg["logo_url"], cfg["sender"]),
+                         ("https://x.test", "https://apps.x.test", "https://x.test/a.png", "https://x.test/l.png",
+                          "me@x.test"))
 
 
 if __name__ == "__main__":

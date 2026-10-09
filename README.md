@@ -243,7 +243,8 @@ scan, not a parse. Per-box: install it separately on p and beta when those get t
 
 ### ost2_completion_nudge.py — nudge learners stuck just short of finishing
 
-Daily cron job that emails the "Li'l Stranger nudge" (mascot image; links to the class, to its
+Daily cron job that emails the "Li'l Stranger nudge" (the platform logo in the same light-gray header
+band as normal course emails, linked to the box's home page; the mascot image; links to the class, to its
 Progress page, and to the box's own `/gamma_dashboard/dashboard/` (Accomplishments) and
 `/gamma_dashboard/leaderboard/` (Leaderboard) pages, built from `LMS_HOST`/`MFE_HOST` so p's email
 points at p; then a course-email footer with a one-click per-class unsubscribe) to learners whose current grade is above 90% but who have not passed and have
@@ -286,7 +287,7 @@ about a class at most once ever and at most once every 7 days overall
 (`~/.local/share/ost2-completion-nudge/sent.jsonl`, ids only, so missed days and reruns are harmless).
 One run sends at most 100 emails, closest-to-done and most-recently-active first, so a backlog drains
 over several days; `--max-inactive-days 365` leaves out learners who vanished years ago. The mascot
-must be reachable before anything is sent.
+and the header logo must both be reachable before anything is sent.
 
 **dev never delivers mail:** the dev-only plugin `ost2_dev_mail_to_files` points the LMS at the file
 backend so a copy of p's learners can never be emailed from dev. There the dry run says "NOTHING IS
@@ -297,7 +298,9 @@ deliver one test from dev, force the limiter backend in a test run (refused with
 python3 ~/ost2-host-scripts/ost2_completion_nudge.py --only-to xeno@ost2.fyi --unsub-as Xeno --mail-backend openedx.core.lib.ost2_ratelimit_email_backend.RateLimitedEmailBackend
 ```
 
-The email image is the transparent PNG `host-scripts/assets/lil-stranger/hello.png` (made from
+The header logo is the one course emails use, `https://<LMS_HOST>/theming/asset/images/logo.png` (it
+redirects to the theme's hashed static file; `--logo-url` overrides it). The mascot is the transparent
+PNG `host-scripts/assets/lil-stranger/hello.png` (made from
 `/lil-stranger/hello.webp` by `assets/make_lil_stranger_png.py`; 600 px wide, displayed at 300 px). It
 is served from the LMS media volume at `https://<LMS_HOST>/media/lil-stranger/hello.png`, so it needs a
 file copy on each box and no restart.
