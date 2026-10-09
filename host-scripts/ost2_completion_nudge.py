@@ -16,8 +16,8 @@ A learner is nudged about a class when ALL of these hold:
     recent activity in any of them either.
 
 The email is the "Li'l Stranger nudge": mascot image on top, links to the class and its Progress
-page, and to this server's Accomplishments and Leaderboard pages, then the standard course-email
-footer (why they got it, a link to their course email settings and a one-click "unsubscribe").
+page, and to this server's Accomplishments and Leaderboard pages, then a course-email footer
+(why they got it, and a one-click per-class "unsubscribe").
 Each learner is nudged about a class at most once, ever (ledger below), and at most once every
 --min-days-between days across classes.
 
@@ -102,7 +102,6 @@ IMAGE_WIDTH = 300  # CSS pixels; the PNG itself is 2x for high-DPI screens
 IMAGE_PATH = "/media/lil-stranger/hello.png"  # served by the LMS media volume, no restart needed
 ACCOMPLISHMENTS_PATH = "/gamma_dashboard/dashboard/"  # LMS routes from edx-gamma-dashboard
 LEADERBOARD_PATH = "/gamma_dashboard/leaderboard/"
-DASHBOARD_PATH = "/dashboard"  # where "course email settings" live (same link as course emails)
 UNSUBSCRIBE_SENTINEL = "@@OST2-UNSUBSCRIBE-URL@@"  # swapped for the per-recipient link by the agent
 TUTOR_ROOT = os.path.expanduser("~/.local/share/tutor")
 DEFAULT_STATE_DIR = os.path.expanduser("~/.local/share/ost2-completion-nudge")
@@ -372,13 +371,18 @@ SIGNOFF = ("Thanks", "Li'l Stranger")
 
 
 def footer_lines(platform_name, recipient, class_name, urls):
-    """The standard course-email footer (same wording as the live default course email template)."""
+    """The course-email footer: the platform's wording minus its "course email settings" link.
+
+    Stock course emails say "update your course email settings here" and link to /dashboard, but
+    the only such setting there is an "Email settings" item inside each class card's menu, which
+    nobody finds from a link.  The unsubscribe page does the same per-class opt-out directly, needs
+    no login, and says up front that other classes' emails are unaffected.
+    """
     return [
         "This email was automatically sent from %s." % platform_name,
         "You are receiving this email at address %s because you are enrolled in %s" % (recipient, class_name),
         "(URL: %s)." % urls["home"],
-        "To stop receiving email like this, update your course email settings at %s." % urls["settings"],
-        "Unsubscribe: %s" % urls["unsubscribe"],
+        "To stop receiving email like this about this class, unsubscribe here: %s" % urls["unsubscribe"],
     ]
 
 
@@ -406,11 +410,9 @@ def render_html(class_name, urls, image_url, platform_name, recipient):
         '<p style="margin:24px 0 0 0;font-size:12px;line-height:1.5;color:#6b7280;">'
         "%s<br>\n"
         "You are receiving this email at address %s because you are enrolled in %s.<br>\n"
-        "To stop receiving email like this, update your course email settings %s.<br><br>\n"
-        "%s</p>" % (
+        "To stop receiving email like this about this class, %s.</p>" % (
             esc("This email was automatically sent from %s." % platform_name), esc(recipient),
-            link(urls["home"], class_name), link(urls["settings"], "here"),
-            link(urls["unsubscribe"], "unsubscribe")))
+            link(urls["home"], class_name), link(urls["unsubscribe"], "unsubscribe here")))
     image = (
         '<div style="text-align:center;margin:0 0 16px 0;">'
         '<img src="%s" width="%d" alt="Li\'l Stranger waving hello" '
@@ -445,8 +447,7 @@ def email_urls(cfg, course_id):
     home, progress = course_urls(cfg["mfe_base"], course_id)
     lms = cfg["lms_base"].rstrip("/")
     return {"home": home, "progress": progress, "accomplishments": lms + ACCOMPLISHMENTS_PATH,
-            "leaderboard": lms + LEADERBOARD_PATH, "settings": lms + DASHBOARD_PATH,
-            "unsubscribe": UNSUBSCRIBE_SENTINEL}
+            "leaderboard": lms + LEADERBOARD_PATH, "unsubscribe": UNSUBSCRIBE_SENTINEL}
 
 
 def render_message(cfg, candidate, recipient, test=False):
@@ -1060,8 +1061,8 @@ def parser():
     ap.add_argument("--db", default="openedx")
     ap.add_argument("--lms-container", default="tutor_local-lms-1",
                     help="container the delivery agent runs in (default %(default)s)")
-    ap.add_argument("--lms-url", help="override the LMS base used for the Accomplishments, Leaderboard "
-                    "and settings links, e.g. https://p.ost2.fyi")
+    ap.add_argument("--lms-url", help="override the LMS base used for the Accomplishments and Leaderboard "
+                    "links, e.g. https://p.ost2.fyi")
     ap.add_argument("--mfe-url", help="override the MFE base, e.g. https://apps.p.ost2.fyi")
     ap.add_argument("--image-url", help="override the mascot PNG URL (default <LMS_HOST>%s)" % IMAGE_PATH)
     ap.add_argument("--skip-image-check", action="store_true", help="do not HEAD-check the mascot image first")

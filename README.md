@@ -246,8 +246,7 @@ scan, not a parse. Per-box: install it separately on p and beta when those get t
 Daily cron job that emails the "Li'l Stranger nudge" (mascot image; links to the class, to its
 Progress page, and to the box's own `/gamma_dashboard/dashboard/` (Accomplishments) and
 `/gamma_dashboard/leaderboard/` (Leaderboard) pages, built from `LMS_HOST`/`MFE_HOST` so p's email
-points at p; then the standard course-email footer with the course-email settings link and a
-one-click unsubscribe) to learners whose current grade is above 90% but who have not passed and have
+points at p; then a course-email footer with a one-click per-class unsubscribe) to learners whose current grade is above 90% but who have not passed and have
 not touched the class for more than 14 days. "% done" is the persisted course grade, the same number
 the learner dashboard shows as "Current grade" (`grades_persistentcoursegrade.percent_grade`);
 activity is the newest `courseware_studentmodule.modified` for that learner and course. Skipped:
@@ -271,8 +270,12 @@ retries when the limiter has no slot free (5/15/45/90 s) or Gmail answers 421/4x
 nothing is dropped or double-sent, the next run resumes); credentials/network/route problems write
 `last_failure` and exit 1. It refuses to send if the box's route is a real SMTP backend WITHOUT the
 limiter, or if the limiter's Redis is unreachable (fail-open would send unpaced). The footer's
-unsubscribe link is built by `bulk_email.api.get_unsubscribed_link`, so it writes the same
-`bulk_email_optout` row the selection already honours. The host script no longer reads any SMTP setting.
+unsubscribe link is built by `bulk_email.api.get_unsubscribed_link` and opens the platform's
+confirm page (no login; GET changes nothing, the Confirm button writes the `bulk_email_optout` row the
+selection already honours). Course-email opt-out is PER CLASS in Open edX, there is no global one: the
+only other place is the "Email settings" item in the menu on each class card of the learner dashboard,
+which is why the stock footer's "update your course email settings here" (a link to `/dashboard`) is
+left out. The host script no longer reads any SMTP setting.
 
 Nothing is sent unless asked: no flag = dry run (counts, who would be nudged by learner id, a pre-flight
 of the mail route with today's server-wide usage and an unsubscribe-link check, a preview of the first

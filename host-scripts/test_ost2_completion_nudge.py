@@ -20,11 +20,10 @@ HOME = "https://apps.p.ost2.fyi/learning/course/%s/home" % ARCH1005
 PROGRESS = "https://apps.p.ost2.fyi/learning/course/%s/progress" % ARCH1005
 ACCOMPLISHMENTS = "https://p.ost2.fyi/gamma_dashboard/dashboard/"
 LEADERBOARD = "https://p.ost2.fyi/gamma_dashboard/leaderboard/"
-SETTINGS = "https://p.ost2.fyi/dashboard"
 SENTINEL = nudge.UNSUBSCRIBE_SENTINEL
 IMAGE = "https://p.ost2.fyi/media/lil-stranger/hello.png"
 URLS = {"home": HOME, "progress": PROGRESS, "accomplishments": ACCOMPLISHMENTS, "leaderboard": LEADERBOARD,
-        "settings": SETTINGS, "unsubscribe": SENTINEL}
+        "unsubscribe": SENTINEL}
 CFG = {"lms_base": "https://p.ost2.fyi", "mfe_base": "https://apps.p.ost2.fyi", "image_url": IMAGE,
        "sender": "info@ost2.fyi", "sender_name": "OpenSecurityTraining2", "lms_host": "p.ost2.fyi"}
 
@@ -65,20 +64,22 @@ class RenderTests(unittest.TestCase):
                       + "until you confirm you're really done with the class.", page)
         self.assertNotIn("the leaderboard", page)
 
-    def test_the_footer_is_the_standard_course_email_footer(self):
+    def test_the_footer_has_the_course_email_wording_and_a_per_class_unsubscribe_but_no_dashboard_link(self):
         page = self.html(recipient="xeno@ost2.fyi")
         self.assertIn("This email was automatically sent from OpenSecurityTraining2.<br>", page)
         self.assertIn("You are receiving this email at address xeno@ost2.fyi because you are enrolled in "
                       '<a href="%s">%s</a>.<br>' % (HOME, ARCH1005_NAME), page)
-        self.assertIn('To stop receiving email like this, update your course email settings '
-                      '<a href="%s">here</a>.' % SETTINGS, page)
-        self.assertIn('<a href="%s">unsubscribe</a></p>' % SENTINEL, page)
+        self.assertIn('To stop receiving email like this about this class, '
+                      '<a href="%s">unsubscribe here</a>.</p>' % SENTINEL, page)
+        self.assertNotIn("/dashboard\"", page.replace("/gamma_dashboard/dashboard/", ""),
+                         "no link to a dashboard 'email settings' page: it has no such page")
+        self.assertNotIn("course email settings", page)
         self.assertLess(page.index("Li'l Stranger</p>"), page.index("This email was automatically sent"),
                         "the footer comes after the sign-off")
 
-    def test_every_link_in_the_html_is_one_of_the_expected_seven(self):
+    def test_every_link_in_the_html_is_one_of_the_expected_six(self):
         hrefs = [chunk.split('"')[0] for chunk in self.html().split('<a href="')[1:]]
-        self.assertEqual(hrefs, [HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD, HOME, SETTINGS, SENTINEL])
+        self.assertEqual(hrefs, [HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD, HOME, SENTINEL])
 
     def test_mascot_is_the_first_thing_in_the_body_and_300_wide(self):
         page = self.html()
@@ -108,8 +109,7 @@ class RenderTests(unittest.TestCase):
             "This email was automatically sent from OpenSecurityTraining2.",
             "You are receiving this email at address xeno@ost2.fyi because you are enrolled in %s" % ARCH1005_NAME,
             "(URL: %s)." % HOME,
-            "To stop receiving email like this, update your course email settings at %s." % SETTINGS,
-            "Unsubscribe: %s" % SENTINEL])
+            "To stop receiving email like this about this class, unsubscribe here: %s" % SENTINEL])
         self.assertLess(text.index("Li'l Stranger\n\n----"), text.index("This email was automatically"))
 
     def test_message_parts_for_the_agent(self):
@@ -120,7 +120,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(item["subject"], "You're so close to finishing %s!" % ARCH1005_NAME)
         self.assertTrue(item["headers"]["Message-ID"].endswith("@ost2.fyi>"))
         self.assertEqual(item["headers"]["Auto-Submitted"], "auto-generated")
-        for url in (HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD, SETTINGS):
+        for url in (HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD):
             self.assertIn(url, item["html"])
             self.assertIn(url, item["text"])
         self.assertIn("someone@example.com", item["html"])
@@ -141,8 +141,7 @@ class RenderTests(unittest.TestCase):
             "home": "https://apps.dev.ost2.fyi/learning/course/%s/home" % ARCH1005,
             "progress": "https://apps.dev.ost2.fyi/learning/course/%s/progress" % ARCH1005,
             "accomplishments": "https://dev.ost2.fyi/gamma_dashboard/dashboard/",
-            "leaderboard": "https://dev.ost2.fyi/gamma_dashboard/leaderboard/",
-            "settings": "https://dev.ost2.fyi/dashboard", "unsubscribe": SENTINEL})
+            "leaderboard": "https://dev.ost2.fyi/gamma_dashboard/leaderboard/", "unsubscribe": SENTINEL})
         self.assertEqual(nudge.email_urls(CFG, ARCH1005), URLS)
         item = nudge.render_message(dev, cand(), "x@example.com")
         self.assertNotIn("p.ost2.fyi", item["html"] + item["text"], "a dev email must not point at p")
@@ -821,7 +820,8 @@ class RunTests(unittest.TestCase):
         self.assertIn("mail route: openedx.core.lib.ost2_ratelimit_email_backend.RateLimitedEmailBackend", out)
         self.assertIn("shared limiter 30/min, daily cap 1800, nudges yield above 900 sent/day", out)
         self.assertIn("the whole server has sent 10 today", out)
-        self.assertIn("Unsubscribe: https://p.ost2.fyi/bulk_email/email/optout/<token>/%s/" % ARCH1005, out)
+        self.assertIn("about this class, unsubscribe here: https://p.ost2.fyi/bulk_email/email/optout/<token>/%s/"
+                      % ARCH1005, out)
         self.assertNotIn(SENTINEL, out)
         self.assertNotIn("learner1@example.com", out)
         self.assertFalse(os.path.exists(os.path.join(self.tmp.name, nudge.LOCK)), "a dry run takes no lock")
