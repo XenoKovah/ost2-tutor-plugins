@@ -243,8 +243,10 @@ scan, not a parse. Per-box: install it separately on p and beta when those get t
 
 ### ost2_completion_nudge.py — nudge learners stuck just short of finishing
 
-Daily cron job that emails the "Li'l Stranger nudge" (mascot image, link to the class, link to its
-Progress page) to learners whose current grade is above 90% but who have not passed and have not
+Daily cron job that emails the "Li'l Stranger nudge" (mascot image; links to the class, to its
+Progress page, and to the box's own `/gamma_dashboard/dashboard/` (Accomplishments) and
+`/gamma_dashboard/leaderboard/` (Leaderboard) pages, built from `LMS_HOST`/`MFE_HOST` so p's email
+points at p) to learners whose current grade is above 90% but who have not passed and have not
 touched the class for more than 14 days. "% done" is the persisted course grade, the same number
 the learner dashboard shows as "Current grade" (`grades_persistentcoursegrade.percent_grade`);
 activity is the newest `courseware_studentmodule.modified` for that learner and course. Skipped:

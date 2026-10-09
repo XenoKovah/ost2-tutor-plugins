@@ -17,9 +17,12 @@ ARCH1005 = "course-v1:OpenSecurityTraining2+Arch1005_IntroRISCV+2024_v1"
 ARCH1005_NAME = "Architecture 1005: RISC-V Assembly"
 HOME = "https://apps.p.ost2.fyi/learning/course/%s/home" % ARCH1005
 PROGRESS = "https://apps.p.ost2.fyi/learning/course/%s/progress" % ARCH1005
+ACCOMPLISHMENTS = "https://p.ost2.fyi/gamma_dashboard/dashboard/"
+LEADERBOARD = "https://p.ost2.fyi/gamma_dashboard/leaderboard/"
 IMAGE = "https://p.ost2.fyi/media/lil-stranger/hello.png"
-CFG = {"mfe_base": "https://apps.p.ost2.fyi", "image_url": IMAGE, "sender": "info@ost2.fyi",
-       "sender_name": "OpenSecurityTraining2", "lms_host": "p.ost2.fyi"}
+URLS = {"home": HOME, "progress": PROGRESS, "accomplishments": ACCOMPLISHMENTS, "leaderboard": LEADERBOARD}
+CFG = {"lms_base": "https://p.ost2.fyi", "mfe_base": "https://apps.p.ost2.fyi", "image_url": IMAGE,
+       "sender": "info@ost2.fyi", "sender_name": "OpenSecurityTraining2", "lms_host": "p.ost2.fyi"}
 
 
 def cand(user_id=1, course=ARCH1005, name=ARCH1005_NAME, percent=0.92, days=30, email=None):
@@ -36,30 +39,43 @@ def db_row(user_id=1, course=ARCH1005, name=ARCH1005_NAME, percent=0.92, days=30
 
 class RenderTests(unittest.TestCase):
     def test_html_carries_the_requested_copy_and_both_links(self):
-        page = nudge.render_html(ARCH1005_NAME, HOME, PROGRESS, IMAGE)
+        page = nudge.render_html(ARCH1005_NAME, URLS, IMAGE)
         self.assertIn("Hi! We see that you're &gt; 90% done with the class "
                       + '<a href="%s">%s</a>! That\'s pretty awesome!' % (HOME, ARCH1005_NAME), page)
         self.assertIn('go check out your <a href="%s">Progress</a> page, to see which units you missed, '
                       "and to mark them as done." % PROGRESS, page)
         self.assertIn('a couple of "Mark as complete" buttons', page)
-        self.assertIn("we can't give you your well-deserved kudos until you confirm you're really done "
-                      "with the class.", page)
         self.assertIn("Thanks<br>Li'l Stranger", page)
 
+    def test_accomplishment_and_leaderboard_are_links_and_leaderboard_is_capitalized(self):
+        page = nudge.render_html(ARCH1005_NAME, URLS, IMAGE)
+        self.assertIn("get their completion certificates (and new "
+                      + '<a href="%s">Accomplishment</a> badges and points towards the ' % ACCOMPLISHMENTS
+                      + '<a href="%s">Leaderboard</a>!), but we can\'t give you your well-deserved kudos '
+                      % LEADERBOARD
+                      + "until you confirm you're really done with the class.", page)
+        self.assertNotIn("the leaderboard", page)
+        self.assertEqual(page.count("<a href="), 4)
+
+    def test_every_link_in_the_html_is_one_of_the_four_expected(self):
+        page = nudge.render_html(ARCH1005_NAME, URLS, IMAGE)
+        hrefs = [chunk.split('"')[0] for chunk in page.split('<a href="')[1:]]
+        self.assertEqual(hrefs, [HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD])
+
     def test_mascot_is_the_first_thing_in_the_body_and_300_wide(self):
-        page = nudge.render_html(ARCH1005_NAME, HOME, PROGRESS, IMAGE)
+        page = nudge.render_html(ARCH1005_NAME, URLS, IMAGE)
         self.assertLess(page.index("<img "), page.index("Hi! We see"))
         self.assertIn('<img src="%s" width="300"' % IMAGE, page)
         self.assertIn("width:300px", page)
         self.assertEqual(page.count("<img "), 1)
 
     def test_class_names_are_html_escaped(self):
-        page = nudge.render_html("Attack & Defense <b>", HOME, PROGRESS, IMAGE)
+        page = nudge.render_html("Attack & Defense <b>", URLS, IMAGE)
         self.assertIn(">Attack &amp; Defense &lt;b&gt;</a>", page)
         self.assertNotIn("<b>", page)
 
     def test_text_part_has_both_urls_and_every_paragraph(self):
-        text = nudge.render_text(ARCH1005_NAME, HOME, PROGRESS)
+        text = nudge.render_text(ARCH1005_NAME, URLS)
         flat = text.replace("\n", " ")
         self.assertIn("%s <%s>! That's pretty awesome!" % (ARCH1005_NAME, HOME), flat)
         self.assertIn("Progress page <%s>, to see which units you missed" % PROGRESS, flat)
@@ -67,6 +83,9 @@ class RenderTests(unittest.TestCase):
         self.assertTrue(text.endswith("Thanks\nLi'l Stranger\n"))
         self.assertIn("<%s>!" % HOME, text.splitlines(), "a long URL must stay unbroken on its own line")
         self.assertIn("<%s>," % PROGRESS, text.splitlines())
+        self.assertIn("(and new Accomplishment <%s> badges and points towards the Leaderboard <%s>!), but "
+                      "we can't give you your well-deserved kudos until you confirm you're really done "
+                      "with the class." % (ACCOMPLISHMENTS, LEADERBOARD), flat)
 
     def test_message_is_multipart_alternative_with_headers(self):
         msg = nudge.build_message(CFG, cand(), "someone@example.com")
@@ -76,7 +95,9 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(msg["Subject"], "You're so close to finishing %s!" % ARCH1005_NAME)
         self.assertEqual(msg.get_content_type(), "multipart/alternative")
         self.assertEqual([p.get_content_type() for p in msg.iter_parts()], ["text/plain", "text/html"])
-        self.assertIn(HOME, msg.get_body(("html",)).get_content())
+        html_part = msg.get_body(("html",)).get_content()
+        for url in (HOME, PROGRESS, ACCOMPLISHMENTS, LEADERBOARD):
+            self.assertIn(url, html_part)
         self.assertTrue(msg["Message-ID"].endswith("@ost2.fyi>"))
 
     def test_test_mode_tags_the_subject_only(self):
@@ -89,6 +110,18 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(nudge.course_urls("https://apps.p.ost2.fyi/", ARCH1005), (HOME, PROGRESS))
         home, _ = nudge.course_urls("https://apps.p.ost2.fyi", "course-v1:Org+C d+Run/1")
         self.assertIn("course-v1:Org+C%20d+Run%2F1/home", home)
+
+    def test_links_are_built_from_each_boxs_own_hosts(self):
+        dev = dict(CFG, lms_base="https://dev.ost2.fyi/", mfe_base="https://apps.dev.ost2.fyi",
+                   image_url="https://dev.ost2.fyi/media/lil-stranger/hello.png")
+        self.assertEqual(nudge.email_urls(dev, ARCH1005), {
+            "home": "https://apps.dev.ost2.fyi/learning/course/%s/home" % ARCH1005,
+            "progress": "https://apps.dev.ost2.fyi/learning/course/%s/progress" % ARCH1005,
+            "accomplishments": "https://dev.ost2.fyi/gamma_dashboard/dashboard/",
+            "leaderboard": "https://dev.ost2.fyi/gamma_dashboard/leaderboard/"})
+        self.assertEqual(nudge.email_urls(CFG, ARCH1005), URLS)
+        page = nudge.build_message(dev, cand(), "x@example.com").get_body(("html",)).get_content()
+        self.assertNotIn("p.ost2.fyi", page, "a dev email must not point at p")
 
     def test_mask_email(self):
         self.assertEqual(nudge.mask_email("alice@example.com"), "a***@example.com")
@@ -273,17 +306,18 @@ class MailerTests(unittest.TestCase):
             dry = nudge.load_config(args, "dry-run")
         self.assertEqual(cfg["smtp"]["sender"], "info@ost2.fyi")
         self.assertEqual((cfg["smtp"]["host"], cfg["smtp"]["port"], cfg["smtp"]["tls"]), ("smtp.example.test", 587, True))
+        self.assertEqual(cfg["lms_base"], "https://p.ost2.fyi")
         self.assertEqual(cfg["mfe_base"], "https://apps.p.ost2.fyi")
         self.assertEqual(cfg["image_url"], "https://p.ost2.fyi/media/lil-stranger/hello.png")
         self.assertNotIn("smtp", dry, "a dry run must not even read the SMTP password")
 
     def test_overrides_win_over_the_boxs_own_settings(self):
-        args = nudge.parser().parse_args(["--mfe-url", "https://apps.x.test", "--image-url", "https://x.test/a.png",
-                                          "--sender", "me@x.test"])
+        args = nudge.parser().parse_args(["--lms-url", "https://x.test", "--mfe-url", "https://apps.x.test",
+                                          "--image-url", "https://x.test/a.png", "--sender", "me@x.test"])
         with mock.patch.object(nudge, "tutor_value", lambda tutor, key: CONFIG[key]):
             cfg = nudge.load_config(args, "dry-run")
-        self.assertEqual((cfg["mfe_base"], cfg["image_url"], cfg["sender"]),
-                         ("https://apps.x.test", "https://x.test/a.png", "me@x.test"))
+        self.assertEqual((cfg["lms_base"], cfg["mfe_base"], cfg["image_url"], cfg["sender"]),
+                         ("https://x.test", "https://apps.x.test", "https://x.test/a.png", "me@x.test"))
 
 
 class FakeMailer:

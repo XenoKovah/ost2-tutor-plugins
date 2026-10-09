@@ -15,8 +15,8 @@ A learner is nudged about a class when ALL of these hold:
   * if the class has other runs (same display name), they have no certificate, no pass and no
     recent activity in any of them either.
 
-The email is the "Li'l Stranger nudge": mascot image on top, a link to the class and a link to
-its Progress page.  Each learner is nudged about a class at most once, ever (ledger below), and
+The email is the "Li'l Stranger nudge": mascot image on top, links to the class and its Progress
+page, and to this server's Accomplishments and Leaderboard pages.  Each learner is nudged about a class at most once, ever (ledger below), and
 at most once every --min-days-between days across classes.
 
 Standard library only; run it from cron on the Tutor host (NOT inside a container).  It reads
@@ -73,6 +73,8 @@ DEFAULT_DELAY = 2.5
 DEFAULT_MIN_DAYS_BETWEEN = 7
 IMAGE_WIDTH = 300  # CSS pixels; the PNG itself is 2x for high-DPI screens
 IMAGE_PATH = "/media/lil-stranger/hello.png"  # served by the LMS media volume, no restart needed
+ACCOMPLISHMENTS_PATH = "/gamma_dashboard/dashboard/"  # LMS routes from edx-gamma-dashboard
+LEADERBOARD_PATH = "/gamma_dashboard/leaderboard/"
 TUTOR_ROOT = os.path.expanduser("~/.local/share/tutor")
 DEFAULT_STATE_DIR = os.path.expanduser("~/.local/share/ost2-completion-nudge")
 DEFAULT_TUTOR = os.path.expanduser("~/tutor-venv/bin/tutor")
@@ -318,29 +320,30 @@ Link = collections.namedtuple("Link", "text url after", defaults=("",))
 SUBJECT = "You're so close to finishing {class_name}!"
 
 
-def paragraphs(class_name, home_url, progress_url):
+def paragraphs(class_name, urls):
     """The nudge, as paragraphs of plain strings and Links, so text and HTML can't drift apart."""
     return [
-        ["Hi! We see that you're > 90% done with the class ", Link(class_name, home_url),
+        ["Hi! We see that you're > 90% done with the class ", Link(class_name, urls["home"]),
          "! That's pretty awesome! But we noticed you haven't been active in the class for more "
          "than 2 weeks."],
         ["While it's possible you just got busy and haven't finished the class, the most common "
          "reason for this is that students miss a couple of \"Mark as complete\" buttons while going "
          "through the class, and then the percentage is just not 100% complete. If that's you, then "
-         "go check out your ", Link("Progress", progress_url, after=" page"),
+         "go check out your ", Link("Progress", urls["progress"], after=" page"),
          ", to see which units you missed, and to mark them as done."],
         ["We love to see students complete the classes and get their completion certificates (and "
-         "new Accomplishment badges and points towards the leaderboard!), but we can't give you your "
-         "well-deserved kudos until you confirm you're really done with the class."],
+         "new ", Link("Accomplishment", urls["accomplishments"]), " badges and points towards the ",
+         Link("Leaderboard", urls["leaderboard"]), "!), but we can't give you your well-deserved "
+         "kudos until you confirm you're really done with the class."],
     ]
 
 
 SIGNOFF = ("Thanks", "Li'l Stranger")
 
 
-def render_text(class_name, home_url, progress_url):
+def render_text(class_name, urls):
     blocks = []
-    for paragraph in paragraphs(class_name, home_url, progress_url):
+    for paragraph in paragraphs(class_name, urls):
         text = "".join(
             "%s%s <%s>" % (p.text, p.after, p.url) if isinstance(p, Link) else p for p in paragraph)
         blocks.append(textwrap.fill(text, 74, break_long_words=False, break_on_hyphens=False))
@@ -348,10 +351,10 @@ def render_text(class_name, home_url, progress_url):
     return "\n\n".join(blocks) + "\n"
 
 
-def render_html(class_name, home_url, progress_url, image_url):
+def render_html(class_name, urls, image_url):
     esc = lambda s: html.escape(s, quote=False)  # noqa: E731 - keeps ' and " readable
     body = []
-    for paragraph in paragraphs(class_name, home_url, progress_url):
+    for paragraph in paragraphs(class_name, urls):
         inner = "".join(
             '<a href="%s">%s</a>%s' % (html.escape(p.url, quote=True), esc(p.text), esc(p.after))
             if isinstance(p, Link) else esc(p) for p in paragraph)
@@ -382,8 +385,16 @@ def course_urls(mfe_base, course_id):
     return base + "/home", base + "/progress"
 
 
+def email_urls(cfg, course_id):
+    """Every link in the email, built from THIS box's hosts so p's email points at p."""
+    home, progress = course_urls(cfg["mfe_base"], course_id)
+    lms = cfg["lms_base"].rstrip("/")
+    return {"home": home, "progress": progress, "accomplishments": lms + ACCOMPLISHMENTS_PATH,
+            "leaderboard": lms + LEADERBOARD_PATH}
+
+
 def build_message(cfg, candidate, recipient, test=False):
-    home_url, progress_url = course_urls(cfg["mfe_base"], candidate.course_id)
+    urls = email_urls(cfg, candidate.course_id)
     subject = SUBJECT.format(class_name=candidate.class_name)
     message = EmailMessage()
     message["From"] = formataddr((cfg["sender_name"], cfg["sender"]))
@@ -394,9 +405,8 @@ def build_message(cfg, candidate, recipient, test=False):
     message["Message-ID"] = make_msgid(domain=cfg["sender"].rpartition("@")[2] or None)
     message["Auto-Submitted"] = "auto-generated"
     message["X-OST2-Mailer"] = "completion-nudge"
-    message.set_content(render_text(candidate.class_name, home_url, progress_url))
-    message.add_alternative(
-        render_html(candidate.class_name, home_url, progress_url, cfg["image_url"]), subtype="html")
+    message.set_content(render_text(candidate.class_name, urls))
+    message.add_alternative(render_html(candidate.class_name, urls, cfg["image_url"]), subtype="html")
     return message
 
 
@@ -524,6 +534,7 @@ def load_config(args, mode):
     mfe_host = mfe_host or "apps." + lms_host
     cfg = {
         "lms_host": lms_host,
+        "lms_base": args.lms_url or "%s://%s" % (scheme, lms_host),
         "mfe_base": args.mfe_url or "%s://%s" % (scheme, mfe_host),
         "image_url": args.image_url or "%s://%s%s" % (scheme, lms_host, IMAGE_PATH),
         "sender": args.sender or get("CONTACT_EMAIL"),
@@ -657,6 +668,8 @@ def parser():
     ap.add_argument("--mysql-container", default="tutor_local-mysql-1")
     ap.add_argument("--mysql-user", default="root")
     ap.add_argument("--db", default="openedx")
+    ap.add_argument("--lms-url", help="override the LMS base used for the Accomplishments and "
+                    "Leaderboard links, e.g. https://p.ost2.fyi")
     ap.add_argument("--mfe-url", help="override the MFE base, e.g. https://apps.p.ost2.fyi")
     ap.add_argument("--image-url", help="override the mascot PNG URL (default <LMS_HOST>%s)" % IMAGE_PATH)
     ap.add_argument("--skip-image-check", action="store_true", help="do not HEAD-check the mascot image first")
