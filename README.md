@@ -241,6 +241,49 @@ Caveat: `tracking.log` is deliberately never rotated (see the `openedx-tutor` lo
 file), so on p it is tens of GB; the script pre-filters with `grep -F` so a run is a linear
 scan, not a parse. Per-box: install it separately on p and beta when those get the MFE.
 
+### ost2_completion_nudge.py — nudge learners stuck just short of finishing
+
+Daily cron job that emails the "Li'l Stranger nudge" (mascot image, link to the class, link to its
+Progress page) to learners whose current grade is above 90% but who have not passed and have not
+touched the class for more than 14 days. "% done" is the persisted course grade, the same number
+the learner dashboard shows as "Current grade" (`grades_persistentcoursegrade.percent_grade`);
+activity is the newest `courseware_studentmodule.modified` for that learner and course. Skipped:
+inactive/staff accounts, inactive enrollments, courses that have not started, have ended or are
+hidden, learners who hold a certificate or allowlist entry, opted out of that course's email, or
+are on its course team, and learners who passed, got a certificate or were recently active in
+another run of the same-named class. Python 3 standard library only; reads the database with
+`docker exec <mysql container> mysql` (SELECT only, session READ ONLY) and sends through the box's
+Tutor SMTP settings like `ost2_unenroll_report.py`.
+
+Nothing is sent unless asked: no flag = dry run (counts, who would be nudged by learner id, a preview
+of the first email); `--only-to ADDR` = test (the real email for the top candidate, delivered to ADDR
+only, subject tagged `[TEST]`, ledger untouched); `--send` = live. A learner is nudged about a class
+at most once ever and at most once every 7 days overall (`~/.local/share/ost2-completion-nudge/sent.jsonl`,
+ids only, so missed days and reruns are harmless). One run sends at most 100 emails, 2.5 s apart (all
+OST2 mail shares one Gmail account, ~2,000/day), closest-to-done and most-recently-active first, so a
+backlog drains over several days; `--max-inactive-days 365` leaves out learners who vanished years ago.
+The mascot must be reachable before anything is sent. A quota/rate-limit reply, bad credentials or a
+network failure stops the run, writes `last_failure` and exits 1; the next run resumes.
+
+The email image is the transparent PNG `host-scripts/assets/lil-stranger/hello.png` (made from
+`/lil-stranger/hello.webp` by `assets/make_lil_stranger_png.py`; 600 px wide, displayed at 300 px). It
+is served from the LMS media volume at `https://<LMS_HOST>/media/lil-stranger/hello.png`, so it needs a
+file copy on each box and no restart.
+
+Install on a box, check the dry run, send one test, then add the cron line:
+
+```
+mkdir -p ~/ost2-host-scripts ~/.local/share/ost2-completion-nudge ~/.local/share/tutor/data/openedx-media/lil-stranger
+cp host-scripts/ost2_completion_nudge.py ~/ost2-host-scripts/
+cp host-scripts/assets/lil-stranger/hello.png ~/.local/share/tutor/data/openedx-media/lil-stranger/
+python3 ~/ost2-host-scripts/ost2_completion_nudge.py
+python3 ~/ost2-host-scripts/ost2_completion_nudge.py --only-to xeno@ost2.fyi
+( crontab -l 2>/dev/null; echo '17 15 * * * /usr/bin/python3 /home/ubuntu/ost2-host-scripts/ost2_completion_nudge.py --send >> /home/ubuntu/.local/share/ost2-completion-nudge/nudge.log 2>&1' ) | crontab -
+```
+
+Do not put the `--send` cron on dev: dev holds a copy of p's learners and their real addresses (use the
+dry run or `--only-to` there). Tests: `cd host-scripts && python3 -m unittest -v test_ost2_completion_nudge`.
+
 ## Implementation notes
 
 - Tutor **Jinja-renders** `ENV_PATCHES` strings, so any Python injected as a patch
