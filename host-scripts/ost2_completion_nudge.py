@@ -16,34 +16,62 @@ A learner is nudged about a class when ALL of these hold:
     recent activity in any of them either.
 
 The email is the "Li'l Stranger nudge": mascot image on top, links to the class and its Progress
-page, and to this server's Accomplishments and Leaderboard pages.  Each learner is nudged about a class at most once, ever (ledger below), and
-at most once every --min-days-between days across classes.
+page, and to this server's Accomplishments and Leaderboard pages, then the standard course-email
+footer (why they got it, a link to their course email settings and a one-click "unsubscribe").
+Each learner is nudged about a class at most once, ever (ledger below), and at most once every
+--min-days-between days across classes.
 
-Standard library only; run it from cron on the Tutor host (NOT inside a container).  It reads
-the database through `docker exec <mysql container> mysql` (SELECT only, session set READ ONLY)
-and sends through the box's own Tutor SMTP settings (SMTP_*, CONTACT_EMAIL), like
-ost2_unenroll_report.py.
+HOW IT SENDS.  Learners are selected on the Tutor host (read-only SQL through
+`docker exec <mysql container> mysql`), but the mail is NOT sent from here.  The host script hands
+the rendered messages to a small delivery agent that runs inside the LMS container
+(`manage.py lms shell`) and sends them through Django's configured EMAIL_BACKEND -- the same route
+as every other system email (password resets, forum notifications, instructor bulk email).  On
+OST2 boxes that backend is `RateLimitedEmailBackend` (plugin ost2_email_ratelimit), which paces ALL
+server mail through one Redis budget: messages at least 2 s apart (30/min) and a hard daily cap,
+because everything is relayed through one Google Workspace account with Gmail's own limits.
+So this job automatically shares the global budget with whatever else the server is sending, and
+the agent also:
+  * yields: it stops once the server-wide count for today passes --yield-above (default 50%) of
+    the daily cap, so bulk or transactional mail is never starved by nudges;
+  * backs off and retries when the limiter says "next slot too far" (5/15/45/90 s) or Gmail
+    answers 421/4xx (60 s, 5 min, 15 min), and stops the run for the day on the daily cap or a
+    Gmail quota reply -- nothing is dropped or double-sent, the next run resumes;
+  * keeps at least --delay seconds (default 2) between this job's own messages;
+  * refuses to send at all if the box's mail route is a real SMTP backend WITHOUT the limiter, or
+    if the limiter's Redis is unreachable (its fail-open mode would send unpaced).
+The unsubscribe link is built by the platform itself (bulk_email.api.get_unsubscribed_link), so
+clicking it writes the same bulk_email_optout row that the selection already honours.
 
 NOTHING IS SENT UNLESS YOU ASK:
 
-  (no flag)            dry run: prints what it would do plus a preview of the first email.
-  --only-to ADDR       TEST: composes the real emails for the selected learners but delivers
-                       them to ADDR only (subject gets "[TEST] "); sends at most 1 unless
-                       --max-send says otherwise; ignores and never writes the ledger.
+  (no flag)            dry run: counts, who would be nudged (learner ids), a pre-flight of the
+                       mail route (backend, limiter settings, today's server-wide usage, an
+                       unsubscribe-link check) and a preview of the first email.
+  --only-to ADDR       TEST: composes the real email for the top candidate(s) and delivers it to
+                       ADDR only (subject gets "[TEST] "); sends at most 1 unless --max-send says
+                       otherwise; ignores and never writes the ledger.  The unsubscribe link
+                       belongs to the account owning ADDR, or to --unsub-as USERNAME, never to the
+                       learner whose data was used.
   --send               LIVE: emails the learners.
 
     17 15 * * *  /usr/bin/python3 ~/ost2-host-scripts/ost2_completion_nudge.py --send \
                  >> ~/.local/share/ost2-completion-nudge/nudge.log 2>&1
 
-Safety rails: --max-send caps one run (default 100) and --delay paces the messages, because all
-OST2 mail shares one Gmail account with a ~2,000/day budget; the newest-and-closest learners go
-first, so a big backlog drains over several days.  The ledger (<state-dir>/sent.jsonl, one JSON
-line per accepted message, learner ids only) is what makes reruns and missed days harmless.  The
-mascot image must be reachable (HEAD check) before anything is sent.  A rate-limit/quota reply
-or an authentication/network failure stops the run, leaves <state-dir>/last_failure and exits 1;
-the next run resumes where this one stopped.
+The dev box writes all of its mail to files (plugin ost2_dev_mail_to_files, so a copy of p's
+learners can never be mailed from dev): there `--send` and `--only-to` write files instead of
+delivering, and the ledger stays untouched.  To really deliver one test email from dev, add
+`--mail-backend openedx.core.lib.ost2_ratelimit_email_backend.RateLimitedEmailBackend` to an
+`--only-to` run (the override is refused with --send).
+
+Other rails: --max-send caps one run (default 100), closest-to-done and most-recently-active
+learners go first so a big backlog drains over several days, and the mascot image must be
+reachable (HEAD check) before anything is sent.  The ledger (<state-dir>/sent.jsonl, one JSON
+line per delivered message, learner ids only) is what makes reruns and missed days harmless.
+Running out of budget (daily cap, yield, Gmail quota/throttle) is a normal early stop (exit 0);
+authentication/network/route problems leave <state-dir>/last_failure and exit 1.
 """
 import argparse
+import base64
 import collections
 import contextlib
 import datetime as dt
@@ -53,38 +81,39 @@ import json
 import os
 import re
 import shutil
-import smtplib
-import ssl
 import subprocess
 import sys
 import textwrap
-import time
+import threading
 import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
-from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
 DEFAULT_MIN_PERCENT = 90.0
 DEFAULT_INACTIVE_DAYS = 14
 DEFAULT_MAX_SEND = 100
-DEFAULT_DELAY = 2.5
+DEFAULT_DELAY = 2.0
+DEFAULT_YIELD_ABOVE = 0.5
+DEFAULT_MAX_RUNTIME = 1800
 DEFAULT_MIN_DAYS_BETWEEN = 7
 IMAGE_WIDTH = 300  # CSS pixels; the PNG itself is 2x for high-DPI screens
 IMAGE_PATH = "/media/lil-stranger/hello.png"  # served by the LMS media volume, no restart needed
 ACCOMPLISHMENTS_PATH = "/gamma_dashboard/dashboard/"  # LMS routes from edx-gamma-dashboard
 LEADERBOARD_PATH = "/gamma_dashboard/leaderboard/"
+DASHBOARD_PATH = "/dashboard"  # where "course email settings" live (same link as course emails)
+UNSUBSCRIBE_SENTINEL = "@@OST2-UNSUBSCRIBE-URL@@"  # swapped for the per-recipient link by the agent
 TUTOR_ROOT = os.path.expanduser("~/.local/share/tutor")
 DEFAULT_STATE_DIR = os.path.expanduser("~/.local/share/ost2-completion-nudge")
 DEFAULT_TUTOR = os.path.expanduser("~/tutor-venv/bin/tutor")
 LEDGER = "sent.jsonl"
 FAIL_MARKER = "last_failure"
 LOCK = "lock"
-MAX_CONSECUTIVE_REFUSALS = 5
 COURSE_ID_RE = re.compile(r"^[A-Za-z0-9_.:+\-]+$")
-QUOTA_RE = re.compile(
-    r"5\.4\.5|4\.7\.|daily|quota|limit|too many|rate[- ]?limit|try again|temporar|throttl", re.I)
+# Why the agent stopped early.  These are the budget doing its job (exit 0, the rest resumes at the
+# next run); any other reason is a problem somebody should look at (exit 1).
+EXPECTED_STOPS = {"daily_cap", "yield_budget", "rate_defer", "gmail_throttle", "gmail_quota", "time_limit"}
 
 
 def utcnow():
@@ -111,11 +140,11 @@ def mask_email(address):
 #  * Datetimes in Open edX are UTC, so UTC_TIMESTAMP() rather than NOW().
 CANDIDATES_SQL = """
 SELECT JSON_OBJECT(
-         'user_id', t.user_id, 'email', t.email, 'course_id', t.course_id,
+         'user_id', t.user_id, 'username', t.username, 'email', t.email, 'course_id', t.course_id,
          'display_name', t.display_name, 'percent', t.percent_grade,
          'last_activity', t.last_activity)
 FROM (
-  SELECT g.user_id, u.email, g.course_id, c.display_name, g.percent_grade,
+  SELECT g.user_id, u.username, u.email, g.course_id, c.display_name, g.percent_grade,
          (SELECT MAX(m.modified) FROM courseware_studentmodule m
            WHERE m.student_id = g.user_id AND m.course_id = g.course_id) AS last_activity
   FROM grades_persistentcoursegrade g
@@ -201,7 +230,7 @@ def mysql_json_rows(args, password, sql):
 
 
 Candidate = collections.namedtuple(
-    "Candidate", "user_id email course_id class_name percent last_activity")
+    "Candidate", "user_id username email course_id class_name percent last_activity")
 
 
 def class_key(name):
@@ -211,6 +240,7 @@ def class_key(name):
 def to_candidate(row):
     return Candidate(
         user_id=int(row["user_id"]),
+        username=row["username"],
         email=row["email"].strip(),
         course_id=row["course_id"],
         class_name=" ".join((row.get("display_name") or "").split()) or row["course_id"],
@@ -223,7 +253,7 @@ def to_candidate(row):
 
 
 class Ledger:
-    """Append-only record of every accepted/refused message: one JSON line each, ids only."""
+    """Append-only record of every delivered/refused message: one JSON line each, ids only."""
 
     def __init__(self, state_dir):
         self.path = os.path.join(state_dir, LEDGER)
@@ -341,25 +371,46 @@ def paragraphs(class_name, urls):
 SIGNOFF = ("Thanks", "Li'l Stranger")
 
 
-def render_text(class_name, urls):
+def footer_lines(platform_name, recipient, class_name, urls):
+    """The standard course-email footer (same wording as the live default course email template)."""
+    return [
+        "This email was automatically sent from %s." % platform_name,
+        "You are receiving this email at address %s because you are enrolled in %s" % (recipient, class_name),
+        "(URL: %s)." % urls["home"],
+        "To stop receiving email like this, update your course email settings at %s." % urls["settings"],
+        "Unsubscribe: %s" % urls["unsubscribe"],
+    ]
+
+
+def render_text(class_name, urls, platform_name, recipient):
     blocks = []
     for paragraph in paragraphs(class_name, urls):
         text = "".join(
             "%s%s <%s>" % (p.text, p.after, p.url) if isinstance(p, Link) else p for p in paragraph)
         blocks.append(textwrap.fill(text, 74, break_long_words=False, break_on_hyphens=False))
     blocks.append("\n".join(SIGNOFF))
+    blocks.append("----\n" + "\n".join(footer_lines(platform_name, recipient, class_name, urls)))
     return "\n\n".join(blocks) + "\n"
 
 
-def render_html(class_name, urls, image_url):
+def render_html(class_name, urls, image_url, platform_name, recipient):
     esc = lambda s: html.escape(s, quote=False)  # noqa: E731 - keeps ' and " readable
+    link = lambda url, text: '<a href="%s">%s</a>' % (html.escape(url, quote=True), esc(text))  # noqa: E731
     body = []
     for paragraph in paragraphs(class_name, urls):
-        inner = "".join(
-            '<a href="%s">%s</a>%s' % (html.escape(p.url, quote=True), esc(p.text), esc(p.after))
-            if isinstance(p, Link) else esc(p) for p in paragraph)
+        inner = "".join(link(p.url, p.text) + esc(p.after) if isinstance(p, Link) else esc(p)
+                        for p in paragraph)
         body.append('<p style="margin:0 0 16px 0;">%s</p>' % inner)
     body.append('<p style="margin:0;">%s<br>%s</p>' % tuple(esc(s) for s in SIGNOFF))
+    body.append(
+        '<p style="margin:24px 0 0 0;font-size:12px;line-height:1.5;color:#6b7280;">'
+        "%s<br>\n"
+        "You are receiving this email at address %s because you are enrolled in %s.<br>\n"
+        "To stop receiving email like this, update your course email settings %s.<br><br>\n"
+        "%s</p>" % (
+            esc("This email was automatically sent from %s." % platform_name), esc(recipient),
+            link(urls["home"], class_name), link(urls["settings"], "here"),
+            link(urls["unsubscribe"], "unsubscribe")))
     image = (
         '<div style="text-align:center;margin:0 0 16px 0;">'
         '<img src="%s" width="%d" alt="Li\'l Stranger waving hello" '
@@ -386,100 +437,375 @@ def course_urls(mfe_base, course_id):
 
 
 def email_urls(cfg, course_id):
-    """Every link in the email, built from THIS box's hosts so p's email points at p."""
+    """Every link in the email, built from THIS box's hosts so p's email points at p.
+
+    The unsubscribe link is per recipient and per course, so it is a placeholder here: the
+    delivery agent swaps in the platform's own link (an encrypted-username token).
+    """
     home, progress = course_urls(cfg["mfe_base"], course_id)
     lms = cfg["lms_base"].rstrip("/")
     return {"home": home, "progress": progress, "accomplishments": lms + ACCOMPLISHMENTS_PATH,
-            "leaderboard": lms + LEADERBOARD_PATH}
+            "leaderboard": lms + LEADERBOARD_PATH, "settings": lms + DASHBOARD_PATH,
+            "unsubscribe": UNSUBSCRIBE_SENTINEL}
 
 
-def build_message(cfg, candidate, recipient, test=False):
+def render_message(cfg, candidate, recipient, test=False):
+    """Everything the delivery agent needs for one email (the agent builds the Django message)."""
     urls = email_urls(cfg, candidate.course_id)
-    subject = SUBJECT.format(class_name=candidate.class_name)
-    message = EmailMessage()
-    message["From"] = formataddr((cfg["sender_name"], cfg["sender"]))
-    message["To"] = recipient
-    message["Reply-To"] = cfg["sender"]
-    message["Subject"] = ("[TEST] " if test else "") + subject
-    message["Date"] = formatdate(usegmt=True)
-    message["Message-ID"] = make_msgid(domain=cfg["sender"].rpartition("@")[2] or None)
-    message["Auto-Submitted"] = "auto-generated"
-    message["X-OST2-Mailer"] = "completion-nudge"
-    message.set_content(render_text(candidate.class_name, urls))
-    message.add_alternative(render_html(candidate.class_name, urls, cfg["image_url"]), subtype="html")
-    return message
+    domain = cfg["sender"].rpartition("@")[2] or None
+    return {
+        "from": formataddr((cfg["sender_name"], cfg["sender"])),
+        "to": recipient,
+        "reply_to": cfg["sender"],
+        "subject": ("[TEST] " if test else "") + SUBJECT.format(class_name=candidate.class_name),
+        "text": render_text(candidate.class_name, urls, cfg["sender_name"], recipient),
+        "html": render_html(candidate.class_name, urls, cfg["image_url"], cfg["sender_name"], recipient),
+        "headers": {
+            "Date": formatdate(usegmt=True),
+            "Message-ID": make_msgid(domain=domain),
+            "Auto-Submitted": "auto-generated",
+            "X-OST2-Mailer": "completion-nudge",
+        },
+    }
 
 
-# --------------------------------------------------------------------------- sending
+# --------------------------------------------------------------------------- the delivery agent
+
+# Runs INSIDE the LMS container (`manage.py lms shell`, production settings), so it can use Django's
+# configured mail route and the platform's own unsubscribe-link helper.  It is shipped to the
+# container on stdin as source text (nothing is installed there) and talks back with one
+# "NUDGE_<TAG> <json>" line per event; every other line is Django start-up noise and is ignored.
+# The source needs no Django at import time, so the tests exec it with stand-ins.
+AGENT_SOURCE = r'''
+import base64
+import json
+import re
+import smtplib
+import ssl
+import time
+
+NON_DELIVERING = (
+    "django.core.mail.backends.filebased", "django.core.mail.backends.locmem",
+    "django.core.mail.backends.console", "django.core.mail.backends.dummy",
+)
+SLOT_BACKOFF = (5, 15, 45, 90)    # seconds; the limiter said the next send slot is too far away
+GMAIL_BACKOFF = (60, 300, 900)    # seconds; Gmail answered 421/4xx (burst throttle)
+MAX_CONSECUTIVE_REFUSALS = 5
+QUOTA_RE = re.compile(r"5\.4\.5|daily|quota|sending limit", re.I)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
-class SendAbort(Exception):
-    """Stop the whole run: rate limit / daily quota, bad credentials, network down."""
+class Stop(Exception):
+    """End the run early; `reason` is one of the short codes the host script understands."""
+
+    def __init__(self, reason, detail=""):
+        super().__init__(reason)
+        self.reason = reason
+        self.detail = detail
 
 
-def classify_smtp_error(exc):
-    """'refused' = this recipient only (permanent, 5xx); 'abort' = everything else."""
+def emit(tag, **fields):
+    try:
+        print("NUDGE_%s %s" % (tag, json.dumps(fields, ensure_ascii=False)), flush=True)
+    except (BrokenPipeError, OSError):
+        raise Stop("host_gone")  # nobody is recording results any more: send nothing else
+
+
+def short(exc):
+    """One line for the log, with e-mail addresses scrubbed (recipient errors quote them)."""
+    return EMAIL_RE.sub("<email>", ("%s: %s" % (type(exc).__name__, exc)).replace("\n", " "))[:300]
+
+
+def reply_text(reply):
+    return reply.decode("utf-8", "replace") if isinstance(reply, (bytes, bytearray)) else str(reply)
+
+
+def classify(exc):
+    """What an SMTP/limiter error means for the run.
+
+    smtplib reports the SAME Gmail reply under different exception types depending on which SMTP
+    command it answered (421 at MAIL FROM is SMTPSenderRefused, at RCPT SMTPRecipientsRefused, at
+    DATA SMTPDataError), so the code and text decide, not the type -- except for the types that
+    can only mean our own side is rejected.
+    """
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return "fatal"
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
         code, reply = next(iter(exc.recipients.values()))
-    elif isinstance(exc, (smtplib.SMTPSenderRefused, smtplib.SMTPAuthenticationError,
-                          smtplib.SMTPConnectError, smtplib.SMTPHeloError)):
-        return "abort"
     elif isinstance(exc, smtplib.SMTPResponseException):
         code, reply = exc.smtp_code, exc.smtp_error
+    elif isinstance(exc, (smtplib.SMTPServerDisconnected, ConnectionError, TimeoutError, ssl.SSLError)):
+        return "disconnected"
     else:
-        return "abort"
-    text = reply.decode("utf-8", "replace") if isinstance(reply, bytes) else str(reply)
-    return "refused" if code >= 500 and not QUOTA_RE.search(text) else "abort"
+        return "fatal"
+    text = reply_text(reply).lower()
+    if code == 451 and "ost2 sending budget" in text:  # RateLimitedEmailBackend deferring
+        return "limiter_daily" if "daily cap" in text else "limiter_slot"
+    if code >= 500 and QUOTA_RE.search(text):
+        return "gmail_quota"
+    if 400 <= code < 500:
+        return "gmail_throttle"
+    if isinstance(exc, (smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError)):
+        return "refused"  # this message/recipient only (repeated refusals still stop the run)
+    return "fatal"  # a 5xx for the connection, HELO or sender: our side is being rejected
 
 
-class Mailer:
-    def __init__(self, settings):
-        self.settings = settings
-        self.client = None
+def describe_route(conn):
+    cls = type(conn)
+    limited = all(hasattr(conn, name) for name in ("daily_cap", "rate_per_min", "key_prefix")) \
+        and hasattr(cls, "redis")
+    if limited:
+        kind = "limited"
+    elif cls.__module__ in NON_DELIVERING:
+        kind = "files"        # mail never leaves the box (dev's ost2_dev_mail_to_files)
+    else:
+        kind = "unlimited"    # a real SMTP backend with no shared budget: never use it
+    info = {"kind": kind, "backend": "%s.%s" % (cls.__module__, cls.__name__)}
+    if limited:
+        info.update(rate_per_min=conn.rate_per_min, daily_cap=conn.daily_cap,
+                    max_block=conn.max_block, fail_open=conn.fail_open)
+    return info
 
-    def _connect(self):
-        s = self.settings
-        if s["ssl"]:
-            client = smtplib.SMTP_SSL(s["host"], s["port"], timeout=60, context=ssl.create_default_context())
-        else:
-            client = smtplib.SMTP(s["host"], s["port"], timeout=60)
-            if s["tls"]:
-                client.starttls(context=ssl.create_default_context())
-        if s["user"]:
-            client.login(s["user"], s["password"])
-        self.client = client
 
-    def close(self):
-        if self.client is not None:
-            with contextlib.suppress(Exception):
-                self.client.quit()
-            self.client = None
+def usage(conn, clock):
+    """Messages the whole server has sent today, from the limiter's own Redis counter."""
+    day = int(clock() // 86400)
+    return int(conn.redis.get("%s:daily:%d" % (conn.key_prefix, day)) or 0)
 
-    def send(self, message, recipient):
-        for attempt in (1, 2):
-            if self.client is None:
-                self._connect()
+
+def mask(url):
+    return re.sub(r"/optout/[^/]+/", "/optout/<token>/", url)
+
+
+def real_deps():
+    from django.contrib.auth import get_user_model
+    from django.core.mail import EmailMultiAlternatives, get_connection
+    from lms.djangoapps.bulk_email.api import get_unsubscribed_link
+
+    user_model = get_user_model()
+
+    class Deps:
+        get_connection = staticmethod(lambda backend: get_connection(backend=backend))
+        user_exists = staticmethod(lambda username: user_model.objects.filter(username=username).exists())
+        username_for_email = staticmethod(lambda email: user_model.objects.filter(
+            email__iexact=email).values_list("username", flat=True).first())
+        unsubscribe_link = staticmethod(get_unsubscribed_link)
+
+        @staticmethod
+        def new_message(subject, text, html, from_email, to, reply_to, headers, connection):
+            message = EmailMultiAlternatives(
+                subject=subject, body=text, from_email=from_email, to=[to],
+                reply_to=[reply_to] if reply_to else None, headers=headers, connection=connection)
+            message.attach_alternative(html, "text/html")
+            return message
+
+    return Deps
+
+
+def nudge_agent(payload, deps=None, sleep=time.sleep, clock=time.time):
+    deps = deps or real_deps()
+    opts = payload["options"]
+    items = payload.get("items", [])
+    sentinel = opts["sentinel"]
+    started = clock()
+    stats = {"sent": 0, "refused": 0, "skipped": 0}
+    stopped = None
+    route = {}
+    conn = None
+
+    def username_of(item):
+        if item.get("username"):
+            return item["username"]
+        if item.get("lookup_email"):
+            return deps.username_for_email(item["lookup_email"])
+        return None
+
+    def reconnect():
+        try:
+            conn.close()
+        except Exception:  # a dead connection may not close cleanly; opening a fresh one is the point
+            pass
+        conn.open()
+
+    def pause(seconds):
+        if clock() - started + seconds > opts["max_runtime"]:
+            raise Stop("time_limit")
+        sleep(seconds)
+
+    def build(item, link):
+        return deps.new_message(
+            subject=item["subject"], text=item["text"].replace(sentinel, link),
+            html=item["html"].replace(sentinel, link), from_email=item["from"], to=item["to"],
+            reply_to=item.get("reply_to"), headers=item.get("headers") or {}, connection=conn)
+
+    def send_one(message):
+        slot_tries = gmail_tries = dropped = 0
+        while True:
             try:
-                self.client.send_message(message, from_addr=self.settings["sender"], to_addrs=[recipient])
-                return
-            except (smtplib.SMTPServerDisconnected, ConnectionError, TimeoutError, ssl.SSLError):
-                self.client = None  # dead connection: reconnect once, then give up
-                if attempt == 2:
-                    raise
+                count = conn.send_messages([message])
+            except Exception as exc:  # classified below; anything unknown stops the run
+                kind = classify(exc)
+                if kind == "refused":
+                    return "refused", short(exc)
+                if kind == "limiter_daily":
+                    raise Stop("daily_cap", short(exc))
+                if kind == "gmail_quota":
+                    raise Stop("gmail_quota", short(exc))
+                if kind == "limiter_slot":
+                    if slot_tries >= len(SLOT_BACKOFF):
+                        raise Stop("rate_defer", short(exc))
+                    wait, slot_tries = SLOT_BACKOFF[slot_tries], slot_tries + 1
+                    emit("BACKOFF", why="the server's mail budget has no slot free", seconds=wait)
+                    pause(wait)
+                    continue
+                if kind == "gmail_throttle":
+                    if gmail_tries >= len(GMAIL_BACKOFF):
+                        raise Stop("gmail_throttle", short(exc))
+                    wait, gmail_tries = GMAIL_BACKOFF[gmail_tries], gmail_tries + 1
+                    emit("BACKOFF", why="Gmail asked us to slow down", seconds=wait)
+                    reconnect()
+                    pause(wait)
+                    continue
+                if kind == "disconnected" and dropped < 2:
+                    dropped += 1
+                    reconnect()
+                    pause(2)
+                    continue
+                raise Stop("error", short(exc))
+            return ("sent", "") if count == 1 else ("refused", "the mail backend accepted 0 messages")
+
+    try:
+        conn = deps.get_connection(opts.get("backend") or None)
+        route = describe_route(conn)
+        if route["kind"] == "limited":
+            try:
+                route["used_today"] = usage(conn, clock)
+            except Exception as exc:
+                raise Stop("limiter_unreachable", short(exc))
+        emit("ROUTE", **route)
+        if route["kind"] == "unlimited":
+            raise Stop("route_unlimited", "%s has no shared rate limit" % route["backend"])
+
+        if payload["action"] == "preflight":
+            for item in items[:1]:
+                username = username_of(item)
+                if not username or not deps.user_exists(username):
+                    raise Stop("error", "no account to build an unsubscribe link for")
+                link = deps.unsubscribe_link(username, item["course_id"])
+                size = len(build(item, link).message().as_bytes())  # builds the MIME exactly as a send would
+                emit("UNSUB_CHECK", ok=True, example=mask(link), message_bytes=size)
+        else:
+            conn.open()  # one connection for the whole run (the backends reuse an open one)
+            streak = 0
+            for position, item in enumerate(items):
+                if clock() - started > opts["max_runtime"]:
+                    raise Stop("time_limit")
+                if route["kind"] == "limited":
+                    try:
+                        used = usage(conn, clock)
+                    except Exception as exc:
+                        raise Stop("limiter_unreachable", short(exc))
+                    if conn.daily_cap and used >= conn.daily_cap * opts["yield_above"]:
+                        raise Stop("yield_budget", "%d of %d sent today by the whole server" % (used, conn.daily_cap))
+                username = username_of(item)
+                if not username or not deps.user_exists(username):
+                    stats["skipped"] += 1
+                    emit("RESULT", idx=item["idx"], status="skipped", detail="no account to unsubscribe")
+                    continue
+                link = deps.unsubscribe_link(username, item["course_id"])
+                begun = clock()
+                status, detail = send_one(build(item, link))
+                if status == "sent":
+                    stats["sent"] += 1
+                    streak = 0
+                else:
+                    stats["refused"] += 1
+                    streak += 1
+                emit("RESULT", idx=item["idx"], status=status, detail=detail)
+                if streak >= MAX_CONSECUTIVE_REFUSALS:
+                    raise Stop("refusals", "%d recipients in a row were refused" % streak)
+                if position < len(items) - 1 and clock() - begun < opts["delay"]:
+                    sleep(opts["delay"] - (clock() - begun))
+    except Stop as stop:
+        stopped = (stop.reason, stop.detail)
+    except Exception as exc:  # last resort: still report, so the host script can fail loudly
+        stopped = ("error", short(exc))
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    summary = dict(stats, stopped=stopped[0] if stopped else None, detail=stopped[1] if stopped else "",
+                   kind=route.get("kind"))
+    if route.get("kind") == "limited":
+        try:
+            summary["used_end"] = usage(conn, clock)
+            summary["daily_cap"] = conn.daily_cap
+        except Exception:
+            pass
+    try:
+        emit("SUMMARY", **summary)
+    except Stop:
+        pass
 
 
-def smtp_settings(args, get):
-    if args.smtp_host:  # local testing against a sink
-        return {"host": args.smtp_host, "port": args.smtp_port or 25, "tls": False, "ssl": False,
-                "user": "", "password": ""}
-    return {
-        "host": get("SMTP_HOST"),
-        "port": int(get("SMTP_PORT") or 587),
-        "tls": get("SMTP_USE_TLS").lower() == "true",
-        "ssl": get("SMTP_USE_SSL").lower() == "true",
-        "user": get("SMTP_USERNAME"),
-        "password": get("SMTP_PASSWORD"),
-    }
+if "PAYLOAD_B64" in globals():
+    nudge_agent(json.loads(base64.b64decode(PAYLOAD_B64).decode("utf-8")))
+'''
+
+
+def agent_command(args):
+    docker = shutil.which("docker") or "/usr/bin/docker"
+    # -c with an explicit stdin read: no reliance on Django noticing piped input
+    return [docker, "exec", "-i", args.lms_container, "./manage.py", "lms", "shell",
+            "-c", "import sys; exec(sys.stdin.read())"]
+
+
+def run_agent(args, payload):
+    """Run the delivery agent in the LMS container; yield its events as (tag, dict) as they happen."""
+    code = "PAYLOAD_B64 = %r\n%s" % (base64.b64encode(json.dumps(payload).encode("utf-8")).decode(), AGENT_SOURCE)
+    proc = subprocess.Popen(agent_command(args), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+    killer = threading.Timer(args.max_runtime + 300, proc.kill)
+    killer.daemon = True
+    killer.start()
+
+    def feed():  # a thread, so a big payload can never deadlock against the child's output
+        try:
+            proc.stdin.write(code)
+            proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+    threading.Thread(target=feed, daemon=True).start()
+    noise = collections.deque(maxlen=12)
+    got_summary = False
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if line.startswith("NUDGE_"):
+                tag, _, data = line[len("NUDGE_"):].partition(" ")
+                try:
+                    event = json.loads(data)
+                except ValueError:
+                    noise.append(line)
+                    continue
+                got_summary = got_summary or tag == "SUMMARY"
+                yield tag, event
+            elif line.strip():
+                noise.append(line)
+    finally:
+        killer.cancel()
+        with contextlib.suppress(Exception):
+            proc.stdout.close()
+        exit_code = proc.wait()
+    if not got_summary:
+        raise RuntimeError("the delivery agent in %s ended (exit %s) without a summary; last output: %s" % (
+            args.lms_container, exit_code, " | ".join(noise)[-600:] or "(none)"))
+
+
+# --------------------------------------------------------------------------- state
 
 
 def check_image(url, timeout=20):
@@ -492,9 +818,6 @@ def check_image(url, timeout=20):
                 raise RuntimeError("mascot image check: %s -> HTTP %s, %r" % (url, response.status, kind))
     except urllib.error.URLError as exc:
         raise RuntimeError("mascot image %s is not reachable (%s); install hello.png first" % (url, exc))
-
-
-# --------------------------------------------------------------------------- state
 
 
 def record_failure(state_dir, text):
@@ -522,7 +845,7 @@ def exclusive_lock(state_dir):
 # --------------------------------------------------------------------------- main
 
 
-def load_config(args, mode):
+def load_config(args):
     get = lambda key: tutor_value(args.tutor, key)  # noqa: E731
     lms_host = get("LMS_HOST")
     https = (get("ENABLE_HTTPS") or "true").lower() == "true"
@@ -532,7 +855,7 @@ def load_config(args, mode):
     except RuntimeError:  # not set on boxes that never customised it
         mfe_host = ""
     mfe_host = mfe_host or "apps." + lms_host
-    cfg = {
+    return {
         "lms_host": lms_host,
         "lms_base": args.lms_url or "%s://%s" % (scheme, lms_host),
         "mfe_base": args.mfe_url or "%s://%s" % (scheme, mfe_host),
@@ -541,9 +864,6 @@ def load_config(args, mode):
         "sender_name": get("PLATFORM_NAME") or "OpenSecurityTraining2",
         "mysql_password": get("MYSQL_ROOT_PASSWORD"),
     }
-    if mode != "dry-run":
-        cfg["smtp"] = dict(smtp_settings(args, get), sender=cfg["sender"])
-    return cfg
 
 
 def describe(candidate, now):
@@ -564,26 +884,101 @@ def print_plan(plan, now, mode, limit=25):
             print("  would nudge " + describe(candidate, now))
         if len(plan.selected) > limit:
             print("  ... and %d more" % (len(plan.selected) - limit))
-        print("  (dry run: nothing sent, nothing saved; --send emails learners, --only-to ADDR tests)")
 
 
-def save_eml(directory, message, index):
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, "nudge-%02d.eml" % index)
-    with open(path, "wb") as handle:
-        handle.write(bytes(message))
-    return path
+def agent_options(args):
+    return {"backend": args.mail_backend, "delay": args.delay, "yield_above": args.yield_above,
+            "max_runtime": args.max_runtime, "sentinel": UNSUBSCRIBE_SENTINEL}
+
+
+def build_items(cfg, selected, args, mode):
+    items = []
+    for index, candidate in enumerate(selected):
+        recipient = args.only_to or candidate.email
+        item = render_message(cfg, candidate, recipient, test=(mode == "test"))
+        item.update(idx=index, course_id=candidate.course_id)
+        if mode == "test":  # never the learner's own link: the account that owns the test address
+            item.update(username=args.unsub_as or "", lookup_email=recipient)
+        else:
+            item.update(username=candidate.username)
+        items.append(item)
+    return items
+
+
+def route_line(route, yield_above):
+    if route["kind"] == "limited":
+        cap = route.get("daily_cap") or 0
+        return ("mail route: %s -- shared limiter %s/min, daily cap %s, nudges yield above %d sent/day; "
+                "the whole server has sent %s today" % (
+                    route["backend"], route.get("rate_per_min"), cap, int(cap * yield_above), route.get("used_today")))
+    if route["kind"] == "files":
+        return ("mail route: %s -- this box writes mail to files, NOTHING IS DELIVERED from here "
+                "(dev's ost2_dev_mail_to_files)" % route["backend"])
+    return "mail route: %s -- NOT rate limited, refusing to send" % route["backend"]
+
+
+def run_preflight(args, cfg, plan, mode):
+    """Dry run: ask the agent about the mail route and the unsubscribe link; send nothing."""
+    payload = {"action": "preflight", "options": agent_options(args),
+               "items": build_items(cfg, plan.selected[:1], args, mode)}
+    ok = False
+    for tag, data in run_agent(args, payload):
+        if tag == "ROUTE":
+            print("  " + route_line(data, args.yield_above))
+        elif tag == "UNSUB_CHECK":
+            print("  unsubscribe link: built by the platform, e.g. %s; the first message builds fine (%s bytes)"
+                  % (data.get("example"), data.get("message_bytes")))
+        elif tag == "SUMMARY":
+            ok = data.get("stopped") is None
+            if not ok:
+                print("  PRE-FLIGHT PROBLEM: %s %s" % (data.get("stopped"), data.get("detail", "")))
+    return ok
+
+
+def send_batch(args, cfg, plan, mode, ledger, now):
+    """Hand the planned emails to the delivery agent; record each result as it streams back."""
+    payload = {"action": "send", "options": agent_options(args), "items": build_items(cfg, plan.selected, args, mode)}
+    result = {"sent": 0, "refused": 0, "skipped": 0, "summary": {}, "delivered": True}
+    for tag, data in run_agent(args, payload):
+        if tag == "ROUTE":
+            result["delivered"] = data["kind"] == "limited"
+            print(route_line(data, args.yield_above))
+        elif tag == "BACKOFF":
+            print("%s backing off %ss: %s" % (utcnow().isoformat(), data["seconds"], data["why"]))
+        elif tag == "RESULT":
+            candidate = plan.selected[data["idx"]]
+            record = mode == "send" and result["delivered"]  # tests and file-only routes leave no trace
+            if data["status"] == "sent":
+                result["sent"] += 1
+                if record:
+                    ledger.append(candidate, "sent", utcnow())
+                label = ("sent" if record else "TEST-sent to %s (not recorded)" % args.only_to) \
+                    if result["delivered"] else "WRITTEN TO A FILE, not delivered (not recorded)"
+                print("%s %s %s" % (utcnow().isoformat(), label, describe(candidate, now)))
+            elif data["status"] == "refused":
+                result["refused"] += 1
+                if record:
+                    ledger.append(candidate, "refused", utcnow())
+                print("%s refused %s (%s)" % (utcnow().isoformat(), describe(candidate, now), data.get("detail")))
+            else:
+                result["skipped"] += 1
+                print("%s skipped %s (%s)" % (utcnow().isoformat(), describe(candidate, now), data.get("detail")))
+        elif tag == "SUMMARY":
+            result["summary"] = data
+    return result
 
 
 def run(args):
     mode = "test" if args.only_to else ("send" if args.send else "dry-run")
     if args.only_to and args.send:
         raise SystemExit("--only-to (test) and --send (live) are mutually exclusive")
+    if (args.mail_backend or args.unsub_as) and mode != "test":
+        raise SystemExit("--mail-backend and --unsub-as are only for --only-to tests")
     max_send = args.max_send if args.max_send is not None else (1 if mode == "test" else DEFAULT_MAX_SEND)
     now = utcnow()
     guard = exclusive_lock(args.state_dir) if mode != "dry-run" else contextlib.nullcontext()
     with guard:
-        cfg = load_config(args, mode)
+        cfg = load_config(args)
         sql = candidates_sql(args.min_percent, args.inactive_days, args.course_id, args.user_id)
         candidates = [to_candidate(row) for row in mysql_json_rows(args, cfg["mysql_password"], sql)]
         ledger = Ledger(args.state_dir)
@@ -594,12 +989,19 @@ def run(args):
         print_plan(plan, now, mode)
 
         if mode == "dry-run":
+            ready = run_preflight(args, cfg, plan, mode)
             if plan.selected:
-                preview = build_message(cfg, plan.selected[0], "preview@example.invalid")
+                first = plan.selected[0]
+                preview = render_message(cfg, first, "preview@example.invalid")
+                sample = "https://%s/bulk_email/email/optout/<token>/%s/" % (cfg["lms_host"], first.course_id)
                 print("\n--- preview of the first email (%s) ---\nSubject: %s\nImage: %s\n\n%s" % (
-                    describe(plan.selected[0], now), preview["Subject"], cfg["image_url"],
-                    preview.get_body(("plain",)).get_content()))
-            return 0
+                    describe(first, now), preview["subject"], cfg["image_url"],
+                    preview["text"].replace(UNSUBSCRIBE_SENTINEL, sample)))
+                if args.preview_html:
+                    with open(args.preview_html, "w", encoding="utf-8") as handle:
+                        handle.write(preview["html"].replace(UNSUBSCRIBE_SENTINEL, sample))
+            print("  (dry run: nothing sent, nothing saved; --send emails learners, --only-to ADDR tests)")
+            return 0 if ready else 1
 
         if not plan.selected:
             print("%s nothing to send" % now.isoformat())
@@ -608,40 +1010,22 @@ def run(args):
         if not args.skip_image_check:
             check_image(cfg["image_url"])
 
-        mailer = Mailer(cfg["smtp"])
-        sent = refused = streak = 0
-        try:
-            for index, candidate in enumerate(plan.selected, 1):
-                recipient = args.only_to or candidate.email
-                message = build_message(cfg, candidate, recipient, test=(mode == "test"))
-                if args.save_eml:
-                    save_eml(args.save_eml, message, index)
-                try:
-                    mailer.send(message, recipient)
-                except Exception as exc:  # noqa: BLE001 - classified below
-                    if classify_smtp_error(exc) == "abort":
-                        raise SendAbort("stopping after %d sent: %s: %s" % (sent, type(exc).__name__, exc)) from exc
-                    refused += 1
-                    streak += 1
-                    if mode == "send":
-                        ledger.append(candidate, "refused", utcnow())
-                    print("%s refused %s (%s)" % (utcnow().isoformat(), describe(candidate, now), exc))
-                    if streak >= MAX_CONSECUTIVE_REFUSALS:
-                        raise SendAbort("%d recipients in a row were refused; something is wrong" % streak)
-                    continue
-                streak = 0
-                sent += 1
-                if mode == "send":
-                    ledger.append(candidate, "sent", utcnow())
-                print("%s %s %s%s" % (utcnow().isoformat(), "sent" if mode == "send" else "TEST-sent to " + args.only_to,
-                                      describe(candidate, now), "" if mode == "send" else " (not recorded)"))
-                if index < len(plan.selected):
-                    time.sleep(args.delay)
-        finally:
-            mailer.close()
+        result = send_batch(args, cfg, plan, mode, ledger, now)
+        summary = result["summary"]
+        stopped = summary.get("stopped")
+        if stopped and stopped not in EXPECTED_STOPS:
+            raise RuntimeError("delivery stopped (%s) after %d sent: %s" % (stopped, result["sent"], summary.get("detail")))
         clear_failure(args.state_dir)
-        print("%s done: sent=%d refused=%d backlog_left=%d" % (
-            utcnow().isoformat(), sent, refused, max(len(plan.eligible) - sent - refused, 0)))
+        if stopped:
+            print("%s stopped early (%s%s): the rest resumes at the next run" % (
+                utcnow().isoformat(), stopped, ": " + summary["detail"] if summary.get("detail") else ""))
+        handled = result["sent"] + result["refused"] + result["skipped"]
+        backlog = max(len(plan.eligible) - handled, 0) if mode == "send" and result["delivered"] else len(plan.eligible)
+        used = ""
+        if summary.get("used_end") is not None:
+            used = " server_sent_today=%s/%s" % (summary["used_end"], summary.get("daily_cap"))
+        print("%s done: sent=%d refused=%d skipped=%d backlog_left=%d%s" % (
+            utcnow().isoformat(), result["sent"], result["refused"], result["skipped"], backlog, used))
         return 0
 
 
@@ -652,7 +1036,14 @@ def parser():
                     "default max 1; the ledger is neither read nor written")
     ap.add_argument("--max-send", type=int, help="most emails in one run (default %d, 1 with --only-to)"
                     % DEFAULT_MAX_SEND)
-    ap.add_argument("--delay", type=float, default=DEFAULT_DELAY, help="seconds between emails")
+    ap.add_argument("--delay", type=float, default=DEFAULT_DELAY,
+                    help="least seconds between two of this job's emails; the server-wide limiter "
+                    "separately keeps ALL mail 2 s apart (default %(default)s)")
+    ap.add_argument("--yield-above", type=float, default=DEFAULT_YIELD_ABOVE,
+                    help="stop once the server has sent this fraction of the daily cap today, "
+                    "leaving the rest to other mail (default %(default)s)")
+    ap.add_argument("--max-runtime", type=int, default=DEFAULT_MAX_RUNTIME,
+                    help="seconds before the run stops by itself (default %(default)s)")
     ap.add_argument("--min-percent", type=float, default=DEFAULT_MIN_PERCENT,
                     help="grade must be ABOVE this percent (default %(default)s)")
     ap.add_argument("--inactive-days", type=int, default=DEFAULT_INACTIVE_DAYS,
@@ -663,19 +1054,24 @@ def parser():
     ap.add_argument("--course-id", action="append", default=[], help="only this course (repeatable)")
     ap.add_argument("--user-id", action="append", type=int, default=[], help="only this user id (repeatable)")
     ap.add_argument("--state-dir", default=DEFAULT_STATE_DIR)
-    ap.add_argument("--save-eml", metavar="DIR", help="also write each composed message here as .eml")
     ap.add_argument("--tutor", default=DEFAULT_TUTOR, help="tutor binary used to read the box's settings")
     ap.add_argument("--mysql-container", default="tutor_local-mysql-1")
     ap.add_argument("--mysql-user", default="root")
     ap.add_argument("--db", default="openedx")
-    ap.add_argument("--lms-url", help="override the LMS base used for the Accomplishments and "
-                    "Leaderboard links, e.g. https://p.ost2.fyi")
+    ap.add_argument("--lms-container", default="tutor_local-lms-1",
+                    help="container the delivery agent runs in (default %(default)s)")
+    ap.add_argument("--lms-url", help="override the LMS base used for the Accomplishments, Leaderboard "
+                    "and settings links, e.g. https://p.ost2.fyi")
     ap.add_argument("--mfe-url", help="override the MFE base, e.g. https://apps.p.ost2.fyi")
     ap.add_argument("--image-url", help="override the mascot PNG URL (default <LMS_HOST>%s)" % IMAGE_PATH)
     ap.add_argument("--skip-image-check", action="store_true", help="do not HEAD-check the mascot image first")
     ap.add_argument("--sender", help="From address (default: tutor CONTACT_EMAIL)")
-    ap.add_argument("--smtp-host", help="override Tutor's SMTP settings (testing)")
-    ap.add_argument("--smtp-port", type=int)
+    ap.add_argument("--mail-backend", metavar="DOTTED.PATH",
+                    help="TEST only: use this Django mail backend instead of the box's own route")
+    ap.add_argument("--unsub-as", metavar="USERNAME",
+                    help="TEST only: build the unsubscribe link for this account (default: the account "
+                    "whose email is the --only-to address)")
+    ap.add_argument("--preview-html", metavar="FILE", help="dry run: also write the first email's HTML here")
     return ap
 
 

@@ -246,31 +246,62 @@ scan, not a parse. Per-box: install it separately on p and beta when those get t
 Daily cron job that emails the "Li'l Stranger nudge" (mascot image; links to the class, to its
 Progress page, and to the box's own `/gamma_dashboard/dashboard/` (Accomplishments) and
 `/gamma_dashboard/leaderboard/` (Leaderboard) pages, built from `LMS_HOST`/`MFE_HOST` so p's email
-points at p) to learners whose current grade is above 90% but who have not passed and have not
-touched the class for more than 14 days. "% done" is the persisted course grade, the same number
+points at p; then the standard course-email footer with the course-email settings link and a
+one-click unsubscribe) to learners whose current grade is above 90% but who have not passed and have
+not touched the class for more than 14 days. "% done" is the persisted course grade, the same number
 the learner dashboard shows as "Current grade" (`grades_persistentcoursegrade.percent_grade`);
 activity is the newest `courseware_studentmodule.modified` for that learner and course. Skipped:
 inactive/staff accounts, inactive enrollments, courses that have not started, have ended or are
 hidden, learners who hold a certificate or allowlist entry, opted out of that course's email, or
 are on its course team, and learners who passed, got a certificate or were recently active in
-another run of the same-named class. Python 3 standard library only; reads the database with
-`docker exec <mysql container> mysql` (SELECT only, session READ ONLY) and sends through the box's
-Tutor SMTP settings like `ost2_unenroll_report.py`.
+another run of the same-named class. Python 3 standard library only; learners are selected on the
+host with `docker exec <mysql container> mysql` (SELECT only, session READ ONLY).
 
-Nothing is sent unless asked: no flag = dry run (counts, who would be nudged by learner id, a preview
-of the first email); `--only-to ADDR` = test (the real email for the top candidate, delivered to ADDR
-only, subject tagged `[TEST]`, ledger untouched); `--send` = live. A learner is nudged about a class
-at most once ever and at most once every 7 days overall (`~/.local/share/ost2-completion-nudge/sent.jsonl`,
-ids only, so missed days and reruns are harmless). One run sends at most 100 emails, 2.5 s apart (all
-OST2 mail shares one Gmail account, ~2,000/day), closest-to-done and most-recently-active first, so a
-backlog drains over several days; `--max-inactive-days 365` leaves out learners who vanished years ago.
-The mascot must be reachable before anything is sent. A quota/rate-limit reply, bad credentials or a
-network failure stops the run, writes `last_failure` and exits 1; the next run resumes.
+**How it sends: through the same route as every other system email.** The host script renders the
+messages and hands them to a small delivery agent that it runs inside the LMS container
+(`docker exec -i tutor_local-lms-1 ./manage.py lms shell`, source on stdin, nothing installed). The
+agent sends with Django's configured `EMAIL_BACKEND`, which on OST2 boxes is the
+`ost2_email_ratelimit` plugin's `RateLimitedEmailBackend`: one Redis budget shared by ALL server mail
+(password resets, forum notifications, instructor bulk email, these nudges) with messages at least 2 s
+apart (30/min) and a hard daily cap (1,800 of Gmail's ~2,000/day for the one Workspace account all mail
+is relayed through). On top of that the agent yields (stops once the whole server has sent 50% of the
+daily cap today, `--yield-above`), keeps 2 s between its own messages (`--delay`), backs off and
+retries when the limiter has no slot free (5/15/45/90 s) or Gmail answers 421/4xx (60 s, 5 min,
+15 min), and ends the run on the daily cap or a Gmail quota reply. Those early stops are normal (exit 0,
+nothing is dropped or double-sent, the next run resumes); credentials/network/route problems write
+`last_failure` and exit 1. It refuses to send if the box's route is a real SMTP backend WITHOUT the
+limiter, or if the limiter's Redis is unreachable (fail-open would send unpaced). The footer's
+unsubscribe link is built by `bulk_email.api.get_unsubscribed_link`, so it writes the same
+`bulk_email_optout` row the selection already honours. The host script no longer reads any SMTP setting.
+
+Nothing is sent unless asked: no flag = dry run (counts, who would be nudged by learner id, a pre-flight
+of the mail route with today's server-wide usage and an unsubscribe-link check, a preview of the first
+email); `--only-to ADDR` = test (the real email for the top candidate, delivered to ADDR only, subject
+tagged `[TEST]`, ledger untouched; its unsubscribe link belongs to the account owning ADDR or to
+`--unsub-as USERNAME`, never to the learner whose data was used); `--send` = live. A learner is nudged
+about a class at most once ever and at most once every 7 days overall
+(`~/.local/share/ost2-completion-nudge/sent.jsonl`, ids only, so missed days and reruns are harmless).
+One run sends at most 100 emails, closest-to-done and most-recently-active first, so a backlog drains
+over several days; `--max-inactive-days 365` leaves out learners who vanished years ago. The mascot
+must be reachable before anything is sent.
+
+**dev never delivers mail:** the dev-only plugin `ost2_dev_mail_to_files` points the LMS at the file
+backend so a copy of p's learners can never be emailed from dev. There the dry run says "NOTHING IS
+DELIVERED from here", and `--send`/`--only-to` write files and leave the ledger alone. To really
+deliver one test from dev, force the limiter backend in a test run (refused with `--send`):
+
+```
+python3 ~/ost2-host-scripts/ost2_completion_nudge.py --only-to xeno@ost2.fyi --unsub-as Xeno --mail-backend openedx.core.lib.ost2_ratelimit_email_backend.RateLimitedEmailBackend
+```
 
 The email image is the transparent PNG `host-scripts/assets/lil-stranger/hello.png` (made from
 `/lil-stranger/hello.webp` by `assets/make_lil_stranger_png.py`; 600 px wide, displayed at 300 px). It
 is served from the LMS media volume at `https://<LMS_HOST>/media/lil-stranger/hello.png`, so it needs a
 file copy on each box and no restart.
+
+This script, the PNG and the cron line are NOT carried to another box by the OST2-sync-with-dev skill
+(it syncs images, pins and enabled Tutor plugins only), so each box needs the install below. On p the
+dry run must report `RateLimitedEmailBackend` as the mail route before the cron line is added.
 
 Install on a box, check the dry run, send one test, then add the cron line:
 
@@ -279,12 +310,12 @@ mkdir -p ~/ost2-host-scripts ~/.local/share/ost2-completion-nudge ~/.local/share
 cp host-scripts/ost2_completion_nudge.py ~/ost2-host-scripts/
 cp host-scripts/assets/lil-stranger/hello.png ~/.local/share/tutor/data/openedx-media/lil-stranger/
 python3 ~/ost2-host-scripts/ost2_completion_nudge.py
-python3 ~/ost2-host-scripts/ost2_completion_nudge.py --only-to xeno@ost2.fyi
+python3 ~/ost2-host-scripts/ost2_completion_nudge.py --only-to xeno@ost2.fyi --unsub-as Xeno
 ( crontab -l 2>/dev/null; echo '17 15 * * * /usr/bin/python3 /home/ubuntu/ost2-host-scripts/ost2_completion_nudge.py --send >> /home/ubuntu/.local/share/ost2-completion-nudge/nudge.log 2>&1' ) | crontab -
 ```
 
-Do not put the `--send` cron on dev: dev holds a copy of p's learners and their real addresses (use the
-dry run or `--only-to` there). Tests: `cd host-scripts && python3 -m unittest -v test_ost2_completion_nudge`.
+Do not put the `--send` cron on dev (it would only write files, and dev holds p's learners' real
+addresses). Tests: `cd host-scripts && python3 -m unittest -v test_ost2_completion_nudge`.
 
 ## Implementation notes
 
