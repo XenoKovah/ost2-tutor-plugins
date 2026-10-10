@@ -30,7 +30,7 @@ _SETTINGS = '''
 # OST2: drop the (meaningless) org / modes / language facets on /courses
 COURSE_DISCOVERY_FILTERS = []
 
-# OST2: hide a signed-in learner's completed courses from /courses discovery,
+# OST2: hide a signed-in learner's completed AND currently-enrolled courses from /courses discovery,
 # installed after app-loading via a one-shot request_started signal.
 def _ost2_install_hide_completed_courses(sender=None, **kwargs):
     from django.core.signals import request_started
@@ -59,10 +59,14 @@ def _ost2_install_hide_completed_courses(sender=None, **kwargs):
 
     def _completed_course_ids(user):
         from lms.djangoapps.certificates.models import GeneratedCertificate
+        from common.djangoapps.student.models import CourseEnrollment
         rows = GeneratedCertificate.objects.filter(
             user=user, status="downloadable"
         ).values_list("course_id", flat=True)
-        return [str(cid) for cid in rows]
+        enrolled = CourseEnrollment.objects.filter(
+            user=user, is_active=True
+        ).values_list("course_id", flat=True)
+        return sorted(set(str(cid) for cid in list(rows) + list(enrolled)))
 
     def course_discovery_search(search_term=None, size=20, from_=0, field_dictionary=None):
         use_search_fields = ["org"]
