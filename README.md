@@ -42,14 +42,14 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | Plugin | dev | p | beta | Source |
 |---|:--:|:--:|:--:|---|
 | disable_studio_course_pagination | ● | ● | ● | `common/` |
-| ost2_authn_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — dev `teak3_2_registration-age-country-help`, p=beta `teak3_1_password18`; needs `tutor images build mfe` |
+| ost2_authn_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — dev=beta `teak3_2_registration-age-country-help`, p `teak3_1_password18`; needs `tutor images build mfe` |
 | ost2_authoring_mfe_fork | ● | ● | ● | per-box — **differs** |
 | ost2_disable_survey_report | ● | ● | ● | `common/` |
 | ost2_email_ratelimit | ● | ● | ● | `common/` |
 | ost2_forum_sort_fix | ● | ● | ● | `common/` |
 | ost2_handouts | ● | ● | ● | `common/` |
 | password_policy | ● | ● | ● | `common/` |
-| registration_custom_fields | ● | ● | ● | `dev/`, `p/`, `beta/` — dev has country **required**, p=beta optional |
+| registration_custom_fields | ● | ● | ● | `dev/`, `p/`, `beta/` — dev=beta country **required**, p optional |
 | enable_instructor_certificate_management | ● | ● | ● | `common/` |
 | ost2_gamification_faq_static | ● | ● | ● | `common/` |
 | ost2_lil_stranger_other_hosts | ● | ● | ● | `common/` — needs ost2_lil_stranger + ost2_mfe_media_proxy |
@@ -68,12 +68,12 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_learning_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — all `teak3_5_timing-feedback-midclass-nudge` (copies differ only in header comments; mid-class nudge only active where the flag plugin is); needs `tutor images build mfe` |
 | ost2_timing_feedback_midclass_nudge | — | — | ● | `beta/` only — MFE_CONFIG flag for the mid-class Timing Feedback nudge (TF is mandatory on beta); never on dev/p |
 | ost2_learner_dashboard_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) — learner-dashboard fork `teak3_3_ost2-dashboard-customizations` (multi-select unenroll survey + current-grade banners + header labels); needs `tutor images build mfe` and a tutor-indigo without the old learner-dashboard patches |
-| ost2_mfe_bookworm_base | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save` |
+| ost2_mfe_bookworm_base | ● | ● | ● | `dev/`, `p/`, `beta/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`. dev=p 0.1.0; beta 0.2.0 adds the `OST2_MFE_NPM_TUNING` npm-throttle switch (true on beta) |
 | ost2_lil_stranger | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_inappropriate_content | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_missing_accomplishments | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_unstarted_enrollment_guard | ● | ● | — | `dev/`, `p/` (dev=p) |
-| ost2_ga4_conversions | ● | — | — | `dev/` — GA4 conversion events for Google Ads; reports to the box's own GA4 property |
+| ost2_ga4_conversions | ● | — | — | `dev/` — GA4 conversion events for Google Ads; reports to the box's own GA4 property. dev and p only, **never beta** |
 | enable_sso | ? | ● | ● | `p/`, `beta/` (p=beta) |
 | set_default_enrollment | ? | ● | ○ | `p/` — beta's disabled copy differs and is not captured |
 | set_parental_consent_age_limit | ? | ● | ● | `p/`, `beta/` (p=beta) |
@@ -115,17 +115,24 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   p and beta run the older **start-only** variant. Converging p/beta to dev's version is
   purely a content update (re-index not required — Meilisearch re-sorts on
   `sortableAttributes` change).
-- **ost2_authn_mfe_fork**, **registration_custom_fields** — **dev runs newer variants**
-  (2026-10-10): Country/Region is required at signup, and the authn fork branch
-  `teak3_2_registration-age-country-help` shows grey help text under Age and Country while
-  focused. p and beta keep `teak3_1_password18` with country optional. Converging them means
-  copying dev's two files, `tutor config save`, `tutor images build mfe`,
+- **ost2_authn_mfe_fork**, **registration_custom_fields** — **dev and beta run newer
+  variants** (dev 2026-10-10, beta synced the same day): Country/Region is required at signup,
+  and the authn fork branch `teak3_2_registration-age-country-help` shows grey help text under
+  Age and Country while focused. p keeps `teak3_1_password18` with country optional.
+  Converging it means copying the two files, `tutor config save`, `tutor images build mfe`,
   `tutor local start -d mfe` and `tutor local restart lms`.
+- **ost2_mfe_bookworm_base** — beta runs 0.2.0, dev and p run 0.1.0. 0.2.0 renders the
+  npm-throttle `ENV npm_config_maxsockets=4 …` line after the MFE Dockerfile's `FROM` when
+  `OST2_MFE_NPM_TUNING` is true (default false), replacing the hand-inserted line that every
+  `tutor config save` wiped. beta sets it true, which renders byte-identically to the old
+  hand-edit, so the cached base layer is reused. p has the same hand-edit and should move to
+  0.2.0 with `tutor config save --set OST2_MFE_NPM_TUNING=true`; dev needs neither.
+- **ost2_ga4_conversions** — dev and p only (decided 2026-10-10); never install it on beta.
 
 ## What each plugin does
 
 - **disable_studio_course_pagination** — Studio home lists all courses on one page (pre-Teak behavior).
-- **ost2_authn_mfe_fork** — repoint the authn MFE to the XenoKovah fork. p and beta: `teak3_1_password18` (18-char password policy). dev: `teak3_2_registration-age-country-help` (that plus grey focus-only help text under Age and Country/Region, and a country box that lists every country when clicked even when pre-filled). Changes an MFE image, so it needs an MFE rebuild.
+- **ost2_authn_mfe_fork** — repoint the authn MFE to the XenoKovah fork. p: `teak3_1_password18` (18-char password policy). dev and beta: `teak3_2_registration-age-country-help` (that plus grey focus-only help text under Age and Country/Region, and a country box that lists every country when clicked even when pre-filled). Changes an MFE image, so it needs an MFE rebuild.
 - **ost2_authoring_mfe_fork** — repoint the authoring (Studio) MFE to the XenoKovah fork
   (`teak3_9_add-component-menu` on all three boxes).
 - **ost2_disable_survey_report** — disable the LMS Django-admin "Open edX Data Sharing Initiative" banner (`SURVEY_REPORT_ENABLE=False`).
@@ -133,7 +140,7 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
 - **ost2_forum_sort_fix** — force-install the forum fork with the MySQL child-comment sort fix.
 - **ost2_handouts** — course handouts fix.
 - **password_policy** — `AUTH_PASSWORD_VALIDATORS` (min length 18, no complexity, max 128) + longer generated passwords so OAuth signups don't 400.
-- **registration_custom_fields** — custom registration fields. p and beta: only Age required. dev: Age and Country/Region required (country picks the account's country Leaderboard). Settings-only — `tutor config save` + `tutor local restart lms`.
+- **registration_custom_fields** — custom registration fields. p: only Age required. dev and beta: Age and Country/Region required (country picks the account's country Leaderboard). Settings-only — `tutor config save` + `tutor local restart lms`.
 - **enable_instructor_certificate_management** — show the instructor-dashboard **Certificates** tab (`/courses/<id>/instructor#view-certificates`) to course-team **Admins** (`CourseInstructorRole`), not only to global site staff. Sets `FEATURES["ENABLE_CERTIFICATES_INSTRUCTOR_MANAGE"] = True`, because `instructor_dashboard.py` gates that section on `access['admin']`, which is Django's site-wide `request.user.is_staff` despite the name. The certificate endpoints in `instructor/permissions.py` are already `is_staff | HasAccessRule('instructor')`, so this only reveals UI the course Admin was already authorized to use — it does not widen who may call those endpoints. Effect is per-course (only where they hold Admin). Does **not** enable the bulk Generate/Regenerate panel — that is a separate flag, `CERTIFICATES_INSTRUCTOR_GENERATION`, left off.
 - **ost2_gamification_faq_static** — serve the Gamification FAQ screenshots at `/GamificationFAQ/<file>` on the LMS, Studio and `apps.*` hosts, so course markdown can use `![](/GamificationFAQ/x.jpg)`. The images are not in the plugin: they live in the LMS media volume, `$(tutor config printroot)/data/openedx-media/GamificationFAQ/`, and Caddy rewrites `/GamificationFAQ/*` to `/media/GamificationFAQ/*` (the `apps.*` host reaches `/media` through `ost2_mfe_media_proxy`). Adding an image is just copying it into that directory. Caddy-only — `tutor config save` + `caddy reload` in the caddy and mfe containers, no restart.
 - **ost2_lil_stranger_other_hosts** — reverse-proxy `/lil-stranger*` (served by the LMS via `ost2_lil_stranger`) from the Studio and `apps.*` hosts to the LMS, so relative `/lil-stranger/<img>` URLs render in Studio previews and MFE-rendered content. Caddy-only, like the above.
@@ -165,7 +172,7 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   GA's validation server, nothing recorded), `OST2_GA4_CONV_MEASUREMENT_ID` (default: the LMS
   `GOOGLE_ANALYTICS_4_ID`, so each box reports to its own property), `OST2_GA4_CONV_API_SECRET`
   (the box's own stream secret; set on the box only, never commit). LMS-only —
-  `tutor config save` + `tutor local restart lms`.
+  `tutor config save` + `tutor local restart lms`. For dev and p only; never beta.
 - **enable_sso** — turn on third-party auth with the Google and GitHub OAuth2 backends (no
   credentials in this file).
 - **set_default_enrollment** — `COURSE_MODE_DEFAULTS` = free
