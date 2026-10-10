@@ -30,10 +30,10 @@ host-scripts/  stdlib scripts run from cron on the Tutor HOST — NOT Tutor plug
 > it finds there.
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
-each box is exactly `common` (12) plus that box's directory. Contents were captured verbatim
+each box is exactly `common` (10) plus that box's directory. Contents were captured verbatim
 from the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
 md5-identical to what is deployed. **p and beta were re-captured on 2026-10-10**: `common/` +
-`p/` and `common/` + `beta/` (12 + 21 = 33 each) are md5-identical to every plugin-root file
+`p/` and `common/` + `beta/` (33 each) are md5-identical to every plugin-root file
 that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 `sitemap_seo` v2 (34). Plugins present but disabled on a box are not captured.
 
@@ -42,14 +42,14 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | Plugin | dev | p | beta | Source |
 |---|:--:|:--:|:--:|---|
 | disable_studio_course_pagination | ● | ● | ● | `common/` |
-| ost2_authn_mfe_fork | ● | ● | ● | `common/` |
+| ost2_authn_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — dev `teak3_2_registration-age-country-help`, p=beta `teak3_1_password18`; needs `tutor images build mfe` |
 | ost2_authoring_mfe_fork | ● | ● | ● | per-box — **differs** |
 | ost2_disable_survey_report | ● | ● | ● | `common/` |
 | ost2_email_ratelimit | ● | ● | ● | `common/` |
 | ost2_forum_sort_fix | ● | ● | ● | `common/` |
 | ost2_handouts | ● | ● | ● | `common/` |
 | password_policy | ● | ● | ● | `common/` |
-| registration_custom_fields | ● | ● | ● | `common/` |
+| registration_custom_fields | ● | ● | ● | `dev/`, `p/`, `beta/` — dev has country **required**, p=beta optional |
 | enable_instructor_certificate_management | ● | ● | ● | `common/` |
 | ost2_gamification_faq_static | ● | ● | ● | `common/` |
 | ost2_lil_stranger_other_hosts | ● | ● | ● | `common/` — needs ost2_lil_stranger + ost2_mfe_media_proxy |
@@ -114,11 +114,17 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   p and beta run the older **start-only** variant. Converging p/beta to dev's version is
   purely a content update (re-index not required — Meilisearch re-sorts on
   `sortableAttributes` change).
+- **ost2_authn_mfe_fork**, **registration_custom_fields** — **dev runs newer variants**
+  (2026-10-10): Country/Region is required at signup, and the authn fork branch
+  `teak3_2_registration-age-country-help` shows grey help text under Age and Country while
+  focused. p and beta keep `teak3_1_password18` with country optional. Converging them means
+  copying dev's two files, `tutor config save`, `tutor images build mfe`,
+  `tutor local start -d mfe` and `tutor local restart lms`.
 
 ## What each plugin does
 
 - **disable_studio_course_pagination** — Studio home lists all courses on one page (pre-Teak behavior).
-- **ost2_authn_mfe_fork** — repoint the authn MFE to the XenoKovah fork (18-char password policy branch).
+- **ost2_authn_mfe_fork** — repoint the authn MFE to the XenoKovah fork. p and beta: `teak3_1_password18` (18-char password policy). dev: `teak3_2_registration-age-country-help` (that plus grey focus-only help text under Age and Country/Region, and a country box that lists every country when clicked even when pre-filled). Changes an MFE image, so it needs an MFE rebuild.
 - **ost2_authoring_mfe_fork** — repoint the authoring (Studio) MFE to the XenoKovah fork
   (`teak3_9_add-component-menu` on all three boxes).
 - **ost2_disable_survey_report** — disable the LMS Django-admin "Open edX Data Sharing Initiative" banner (`SURVEY_REPORT_ENABLE=False`).
@@ -126,7 +132,7 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
 - **ost2_forum_sort_fix** — force-install the forum fork with the MySQL child-comment sort fix.
 - **ost2_handouts** — course handouts fix.
 - **password_policy** — `AUTH_PASSWORD_VALIDATORS` (min length 18, no complexity, max 128) + longer generated passwords so OAuth signups don't 400.
-- **registration_custom_fields** — custom registration fields (only AGE required).
+- **registration_custom_fields** — custom registration fields. p and beta: only Age required. dev: Age and Country/Region required (country picks the account's country Leaderboard). Settings-only — `tutor config save` + `tutor local restart lms`.
 - **enable_instructor_certificate_management** — show the instructor-dashboard **Certificates** tab (`/courses/<id>/instructor#view-certificates`) to course-team **Admins** (`CourseInstructorRole`), not only to global site staff. Sets `FEATURES["ENABLE_CERTIFICATES_INSTRUCTOR_MANAGE"] = True`, because `instructor_dashboard.py` gates that section on `access['admin']`, which is Django's site-wide `request.user.is_staff` despite the name. The certificate endpoints in `instructor/permissions.py` are already `is_staff | HasAccessRule('instructor')`, so this only reveals UI the course Admin was already authorized to use — it does not widen who may call those endpoints. Effect is per-course (only where they hold Admin). Does **not** enable the bulk Generate/Regenerate panel — that is a separate flag, `CERTIFICATES_INSTRUCTOR_GENERATION`, left off.
 - **ost2_gamification_faq_static** — serve the Gamification FAQ screenshots at `/GamificationFAQ/<file>` on the LMS, Studio and `apps.*` hosts, so course markdown can use `![](/GamificationFAQ/x.jpg)`. The images are not in the plugin: they live in the LMS media volume, `$(tutor config printroot)/data/openedx-media/GamificationFAQ/`, and Caddy rewrites `/GamificationFAQ/*` to `/media/GamificationFAQ/*` (the `apps.*` host reaches `/media` through `ost2_mfe_media_proxy`). Adding an image is just copying it into that directory. Caddy-only — `tutor config save` + `caddy reload` in the caddy and mfe containers, no restart.
 - **ost2_lil_stranger_other_hosts** — reverse-proxy `/lil-stranger*` (served by the LMS via `ost2_lil_stranger`) from the Studio and `apps.*` hosts to the LMS, so relative `/lil-stranger/<img>` URLs render in Studio previews and MFE-rendered content. Caddy-only, like the above.
