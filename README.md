@@ -58,7 +58,7 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_forum_profile_links | ● | ● | ● | per-box — host |
 | ost2_mfe_media_proxy | ● | ● | ● | per-box — host (dev=p) |
 | ost2_courses_hide_completed | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
-| GoogleAnalytics4Plugin | ○ | ● | ● | per-box — GA id |
+| GoogleAnalytics4Plugin | ● | ● | ● | per-box — GA id (never copy between boxes) |
 | ost2_student_grade_lookup | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_default_grading_policy | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_communications_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) — needs matching LMS branch |
@@ -73,7 +73,7 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_report_inappropriate_content | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_missing_accomplishments | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_unstarted_enrollment_guard | ● | ● | — | `dev/`, `p/` (dev=p) |
-| ost2_ga4_conversions | ● | — | — | `dev/` — GA4 conversion events for Google Ads; dev runs it validate-only with a dummy measurement id |
+| ost2_ga4_conversions | ● | — | — | `dev/` — GA4 conversion events for Google Ads; reports to the box's own GA4 property |
 | enable_sso | ? | ● | ● | `p/`, `beta/` (p=beta) |
 | set_default_enrollment | ? | ● | ○ | `p/` — beta's disabled copy differs and is not captured |
 | set_parental_consent_age_limit | ? | ● | ● | `p/`, `beta/` (p=beta) |
@@ -89,8 +89,9 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
 ### Per-box differences
 
 - **GoogleAnalytics4Plugin** — GA4 measurement ID differs: p = `G-2J9NKZGFKK`,
-  beta = `G-GL3SQZS9CB`. **Disabled on dev** ("GA dark" since the Teak cutover); dev's
-  disabled copy is not captured here.
+  beta = `G-GL3SQZS9CB`, dev = `G-KR83SZ2FGC` (its own property "dev.ost2.fyi - GA4", created
+  2026-10-10 so dev traffic stays out of p's reports; before that dev's copy carried p's id and
+  stayed disabled). Never copy this file from one box to another.
 - **ost2_forum_profile_links**, **ost2_mfe_media_proxy** — differ only by the baked-in MFE
   host (`apps.dev|p|beta.ost2.fyi`). dev's and p's `ost2_mfe_media_proxy.py` are
   byte-identical; beta's differs only in its docstring. **ost2_discussions_mfe_fork** no
@@ -162,8 +163,8 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   `_ga` / `_ga_<stream>` cookies, so GA joins it to the ad-click session; only for the learner's own request,
   after the DB commit. Config: `OST2_GA4_CONV_MODE` (`off` | `validate` | `send`, default `validate` =
   GA's validation server, nothing recorded), `OST2_GA4_CONV_MEASUREMENT_ID` (default: the LMS
-  `GOOGLE_ANALYTICS_4_ID`), `OST2_GA4_CONV_API_SECRET` (set on the box only, never commit). dev:
-  `validate` + dummy id `G-OST2DEVTEST`, so it can never write into p's GA property. LMS-only —
+  `GOOGLE_ANALYTICS_4_ID`, so each box reports to its own property), `OST2_GA4_CONV_API_SECRET`
+  (the box's own stream secret; set on the box only, never commit). LMS-only —
   `tutor config save` + `tutor local restart lms`.
 - **enable_sso** — turn on third-party auth with the Google and GitHub OAuth2 backends (no
   credentials in this file).

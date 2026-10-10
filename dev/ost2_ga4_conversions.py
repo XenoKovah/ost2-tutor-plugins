@@ -29,9 +29,9 @@ Config (`tutor config save --set NAME=value`):
                     nothing is recorded in GA. Use on dev.
         send     -> /mp/collect, recorded in GA. Use on p only.
   OST2_GA4_CONV_MEASUREMENT_ID  GA4 measurement id. Empty (default) = the LMS setting
-                                GOOGLE_ANALYTICS_4_ID from GoogleAnalytics4Plugin. dev has
-                                that plugin disabled and sets a dummy id instead, so dev can
-                                never write into p's GA property.
+                                GOOGLE_ANALYTICS_4_ID from GoogleAnalytics4Plugin, i.e. each box
+                                reports to its own property (p = G-2J9NKZGFKK,
+                                dev = G-KR83SZ2FGC "dev.ost2.fyi - GA4").
   OST2_GA4_CONV_API_SECRET      Measurement Protocol API secret (GA4 Admin > Data streams >
                                 <web stream> > Measurement Protocol API secrets). Needed for
                                 send. Set it on the box only; never commit it.
@@ -41,7 +41,7 @@ LMS-only, no image rebuild: `tutor config save` + `tutor local restart lms`.
 """
 from tutor import hooks
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 hooks.Filters.CONFIG_DEFAULTS.add_items(
     [
