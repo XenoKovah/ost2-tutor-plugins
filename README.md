@@ -30,10 +30,12 @@ host-scripts/  stdlib scripts run from cron on the Tutor HOST — NOT Tutor plug
 > it finds there.
 
 **To (re)provision a box: install `common/*.py` + `<box>/*.py`.** The plugin set for
-each box is exactly `common` (12) plus that box's directory — dev=22, p=17, beta=18,
-matching the live `tutor plugins list` on each. Contents were captured verbatim from
-the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
-md5-identical to what is deployed.
+each box is exactly `common` (12) plus that box's directory. Contents were captured verbatim
+from the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
+md5-identical to what is deployed. **p was re-captured on 2026-10-10**: `common/` + `p/`
+(12 + 21 = 33) is md5-identical to every plugin-root file p has *enabled* in
+`~/tutor-venv/bin/tutor plugins list`. Plugins present but disabled on a box are not captured.
+`beta/` lags live beta (see † below).
 
 ## Enablement matrix
 
@@ -52,42 +54,55 @@ md5-identical to what is deployed.
 | ost2_gamification_faq_static | ● | ● | ● | `common/` |
 | ost2_lil_stranger_other_hosts | ● | ● | ● | `common/` — needs ost2_lil_stranger + ost2_mfe_media_proxy |
 | ost2_course_discovery_sort | ● | ● | ● | per-box — **differs** |
-| ost2_discussions_mfe_fork | ● | ● | ● | per-box — host |
+| ost2_discussions_mfe_fork | ● | ● | ● | per-box — dev=p (`teak3_3_lil_stranger_empty_image`); `beta/` copy is stale (teak3_1), live beta = p's file |
 | ost2_forum_profile_links | ● | ● | ● | per-box — host |
 | ost2_mfe_media_proxy | ● | ● | ● | per-box — host (dev=p) |
-| ost2_courses_hide_completed | ● | — | ● | `dev/`, `beta/` |
+| ost2_courses_hide_completed | ● | ● | ● | `dev/`, `p/`, `beta/` — dev=p; `beta/` copy is stale, live beta = p's file |
 | GoogleAnalytics4Plugin | ○ | ● | ● | per-box — GA id |
-| ost2_student_grade_lookup | ● | — | — | `dev/` (prototype) |
-| ost2_default_grading_policy | ● | — | — | `dev/` |
-| ost2_communications_mfe_fork | ● | — | — | `dev/` (needs matching LMS branch) |
+| ost2_student_grade_lookup | ● | ● | ●† | `dev/`, `p/` (dev=p) |
+| ost2_default_grading_policy | ● | ● | ●† | `dev/`, `p/` (dev=p) |
+| ost2_communications_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` (all identical; needs matching LMS branch) |
 | ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
-| disable_markdown_safemode | ● | ? | ○ | `dev/` |
-| ost2_markdown_xblock_parse_xml | ● | — | — | `dev/` — needs `tutor images build openedx` |
-| ost2_learning_mfe_fork | ● | — | ● | `dev/`, `beta/` — both `teak3_5_timing-feedback-midclass-nudge` (mid-class nudge only active where the flag plugin is); needs `tutor images build mfe` |
+| disable_markdown_safemode | ● | ● | ●† | `dev/`, `p/` (dev=p) |
+| ost2_markdown_xblock_parse_xml | ● | ● | ●† | `dev/`, `p/` (dev=p) — needs `tutor images build openedx` |
+| ost2_learning_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — all `teak3_5_timing-feedback-midclass-nudge` (copies differ only in header comments; mid-class nudge only active where the flag plugin is); needs `tutor images build mfe` |
 | ost2_timing_feedback_midclass_nudge | — | — | ● | `beta/` only — MFE_CONFIG flag for the mid-class Timing Feedback nudge (TF is mandatory on beta); never on dev/p |
-| ost2_learner_dashboard_mfe_fork | ● | — | — | `dev/` — learner-dashboard fork `teak3_3_ost2-dashboard-customizations` (multi-select unenroll survey + current-grade banners + header labels); needs `tutor images build mfe` and a tutor-indigo without the old learner-dashboard patches |
-| ost2_mfe_bookworm_base | ● | — | — | `dev/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`; p/beta get it on next sync-with-dev |
+| ost2_learner_dashboard_mfe_fork | ● | ● | ●† | `dev/`, `p/` (dev=p) — learner-dashboard fork `teak3_3_ost2-dashboard-customizations` (multi-select unenroll survey + current-grade banners + header labels); needs `tutor images build mfe` and a tutor-indigo without the old learner-dashboard patches |
+| ost2_mfe_bookworm_base | ● | ● | ●† | `dev/`, `p/` (dev=p) — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save` |
+| ost2_lil_stranger | ● | ● | ●† | `dev/`, `p/` (dev=p) |
+| ost2_report_inappropriate_content | ● | ● | ●† | `dev/`, `p/` (dev=p) |
+| ost2_report_missing_accomplishments | ● | ● | ●† | `dev/`, `p/` (dev=p) |
+| ost2_unstarted_enrollment_guard | ● | ● | — | `dev/`, `p/` (dev=p) |
+| enable_sso | ? | ● | ●† | `p/` |
+| set_default_enrollment | ? | ● | ○ | `p/` — file is `set_default_enrollement.yml`; beta's disabled copy differs |
+| set_parental_consent_age_limit | ? | ● | ●† | `p/` |
 
-● enabled · ○ present but **disabled** · — not installed · ? not verified
+● enabled · ○ present but **disabled** · — not installed · ? not verified ·
+† enabled on live beta with a file md5-identical to the `p/` copy (checked 2026-10-10) but not yet captured in `beta/`
+
+"dev=p" above means the `dev/` and `p/` copies are byte-identical. They are duplicated rather than
+moved to `common/` because `common/` requires byte-identical *and* enabled on all three boxes
+verified live, and on 2026-10-10 dev's SSH was unreachable and `beta/` is stale. Once dev is
+re-verified and beta re-captured, the rows marked dev=p plus † are candidates for `common/`.
 
 ### Per-box differences
 
 - **GoogleAnalytics4Plugin** — GA4 measurement ID differs: p = `G-2J9NKZGFKK`,
   beta = `G-GL3SQZS9CB`. **Disabled on dev** ("GA dark" since the Teak cutover); dev's
   disabled copy is not captured here.
-- **ost2_forum_profile_links**, **ost2_discussions_mfe_fork**, **ost2_mfe_media_proxy**
-  — differ only by the baked-in MFE host (`apps.dev|p|beta.ost2.fyi`). dev's and p's
-  `ost2_mfe_media_proxy.py` are byte-identical; beta's differs only in its docstring.
-- **ost2_authoring_mfe_fork** — **p lags one fork branch**: dev and beta pin
-  `teak3_3_remove-studio-home-about-blurb` (byte-identical copies), p still pins
-  `teak3_2_course-handouts-ui`. teak3_3 only drops the "New to Studio?" about blurb
-  from the Studio home sidebar, so converging p is purely additive — bump the pin and
-  rebuild the `mfe` image there.
-- **disable_markdown_safemode** — beta carries an untracked 2024 copy of this file that is
-  **disabled** and has the wrong payload (`safe_mode: False` but with the seven extra
-  markdown2 extras); it is not captured here. beta and p both still have the underlying
-  `[HTML_REMOVED]` bug — the fix is a copy of `dev/disable_markdown_safemode.yml` plus
-  `tutor plugins enable`. p's state was not verified (no SSH access at the time of writing).
+- **ost2_forum_profile_links**, **ost2_mfe_media_proxy** — differ only by the baked-in MFE
+  host (`apps.dev|p|beta.ost2.fyi`). dev's and p's `ost2_mfe_media_proxy.py` are
+  byte-identical; beta's differs only in its docstring. **ost2_discussions_mfe_fork** no
+  longer bakes a host: dev, p and live beta run the same file (its header still says
+  "built on ap.ost2.fyi").
+- **ost2_authoring_mfe_fork** — all three boxes pin `teak3_9_add-component-menu` (one
+  byte-identical copy, in `common/`).
+- **disable_markdown_safemode** — enabled on dev and p with the same file (`dev/` = `p/`);
+  live beta also runs it (2026-10-10), replacing the disabled 2024 copy it used to carry.
+- **p's disabled plugins (not captured)** — p also has `sitemap_seo.py`,
+  `disable_course_discovery.yml`, `enable_instructor_grade_report_generation.yml`,
+  `set_PLATFORM_TWITTER_ACCOUNT.yml` and `YTAPI.yml` in its plugins root, all installed but
+  **not enabled**. `YTAPI.yml` contains secrets: never commit it.
 - **ost2_course_discovery_sort** — **dev runs a newer variant** (sorts the `/courses`
   catalog by course start date, then course title `content.display_name` as tie-break);
   p and beta run the older **start-only** variant. Converging p/beta to dev's version is
@@ -99,7 +114,7 @@ md5-identical to what is deployed.
 - **disable_studio_course_pagination** — Studio home lists all courses on one page (pre-Teak behavior).
 - **ost2_authn_mfe_fork** — repoint the authn MFE to the XenoKovah fork (18-char password policy branch).
 - **ost2_authoring_mfe_fork** — repoint the authoring (Studio) MFE to the XenoKovah fork
-  (p is one branch behind dev/beta; see Per-box differences).
+  (`teak3_9_add-component-menu` on all three boxes).
 - **ost2_disable_survey_report** — disable the LMS Django-admin "Open edX Data Sharing Initiative" banner (`SURVEY_REPORT_ENABLE=False`).
 - **ost2_email_ratelimit** — `RateLimitedEmailBackend` to stay under Gmail send throttles.
 - **ost2_forum_sort_fix** — force-install the forum fork with the MySQL child-comment sort fix.
@@ -115,6 +130,25 @@ md5-identical to what is deployed.
 - **ost2_mfe_media_proxy** — proxy LMS content paths (`/media`, `/asset-v1`) from the MFE host to the LMS so Discussions-MFE forum images resolve.
 - **ost2_courses_hide_completed** — hide already-completed courses from the `/courses` listing.
 - **GoogleAnalytics4Plugin** — inject the GA4 tag id on the LMS + MFEs.
+- **ost2_lil_stranger** — public Li'l Stranger "says hello" page at `/lil-stranger/` on the LMS,
+  plus the `hello.webp` / `telescope.webp` images every Li'l Stranger image on the site links to
+  or uses (images embedded base64). LMS-only — `tutor config save` + `tutor local restart lms`.
+- **ost2_report_inappropriate_content** — login-required `/report-user/<username>/` form behind the
+  profile MFE's "Report inappropriate content" link; emails the report to `xeno@ost2.fyi` through
+  the rate-limited SMTP backend. LMS-only.
+- **ost2_report_missing_accomplishments** — login-required `/report-missing-accomplishments/` form
+  behind the gamma dashboard's "Report missing or incorrect accomplishments" link; emails it to
+  `xeno@ost2.fyi`. LMS-only.
+- **ost2_unstarted_enrollment_guard** — a learner actively enrolled in 5+ courses that are all
+  still at 0% current grade (no downloadable certificate) is sent to
+  `/too-many-unstarted-classes/` instead of enrolling in another; global staff exempt. LMS-only.
+- **enable_sso** — turn on third-party auth with the Google and GitHub OAuth2 backends (no
+  credentials in this file).
+- **set_default_enrollment** (`set_default_enrollement.yml`) — `COURSE_MODE_DEFAULTS` = free
+  **Honor** mode (honor certificate), instead of stock audit.
+- **set_parental_consent_age_limit** — `PARENTAL_CONSENT_AGE_LIMIT = None` and
+  `EMAIL_OPTIN_MINIMUM_AGE = None`, so learners with no year of birth are not forced to a
+  private profile or opted out of email.
 - **ost2_student_grade_lookup** — staff-only `/admin/student-grade-lookup/` page: look up a learner by username/email/ID and list all enrollments + live grade % + certificate status (incl. certificate-exception flag); sortable columns; linked from the admin index.
 - **ost2_communications_mfe_fork** — repoint the communications (bulk email) MFE to the XenoKovah fork, which adds the "Don't send to" → "Students who completed the class." checkbox and a switch under the "Body" heading that turns the rich text editor into a plain textarea. The checkbox requires the edx-platform branch `teak3_12_bulk_email_exclude_completed`, which teaches the LMS the `exclude_completed` target; without it the LMS rejects the send with a 400. The plaintext switch is frontend-only. Changes an MFE image, so it needs an MFE rebuild, not just `tutor config save`.
 - **ost2_learner_dashboard_mfe_fork** — repoint the learner-dashboard MFE to the XenoKovah fork branch `teak3_3_ost2-dashboard-customizations` (upstream `release/teak.3` + the multi-select unenroll survey and its tracking-log write, which feeds `host-scripts/ost2_unenroll_report.py`, + the "Current grade: N%" banners and "My Enrolled Courses" / "Discover New Courses" header labels that used to be tutor-indigo build patches). **Pair it with a tutor-indigo that no longer carries those patches** (their guard greps would fail the build); a box that does not pin this fork needs the patches. Changes an MFE image, so it needs an MFE rebuild.
@@ -198,6 +232,9 @@ done
 ~/tutor-venv/bin/tutor config save
 ~/tutor-venv/bin/tutor local restart lms cms
 ```
+
+`set_default_enrollement.yml` declares the plugin name `set_default_enrollment`, so enable
+that name by hand (the loop above would try the misspelt filename).
 
 The `ost2_forum_sort_fix`, `ost2_authn_mfe_fork`, `ost2_authoring_mfe_fork`, and
 `ost2_discussions_mfe_fork` plugins pin MFE/forum forks that are baked at image build

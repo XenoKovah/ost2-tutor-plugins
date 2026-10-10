@@ -1,0 +1,7 @@
+name: enable_sso
+version: 0.1.0
+patches:
+  openedx-lms-common-settings: |
+    FEATURES["ENABLE_THIRD_PARTY_AUTH"] = True
+    THIRD_PARTY_AUTH_BACKENDS = ["social_core.backends.google.GoogleOAuth2", "social_core.backends.github.GithubOAuth2"]
+    AUTHENTICATION_BACKENDS = THIRD_PARTY_AUTH_BACKENDS + list(AUTHENTICATION_BACKENDS)

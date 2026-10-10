@@ -1,0 +1,11 @@
+name: set_parental_consent_age_limit
+version: 0.1.0
+patches:
+  openedx-lms-common-settings: |
+    # Disable the under-13 parental-consent gate so users with no year_of_birth
+    # are not force-set to private (requires_parental_consent() short-circuits to False).
+    PARENTAL_CONSENT_AGE_LIMIT = None
+    # Also drop the age gate on the default org-wide marketing-email opt-in.
+    # Passed as age_limit into requires_parental_consent(); None falls back to
+    # PARENTAL_CONSENT_AGE_LIMIT (None) -> returns False (no age-based force-opt-out).
+    EMAIL_OPTIN_MINIMUM_AGE = None
