@@ -68,7 +68,7 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_learning_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — all `teak3_5_timing-feedback-midclass-nudge` (copies differ only in header comments; mid-class nudge only active where the flag plugin is); needs `tutor images build mfe` |
 | ost2_timing_feedback_midclass_nudge | — | — | ● | `beta/` only — MFE_CONFIG flag for the mid-class Timing Feedback nudge (TF is mandatory on beta); never on dev/p |
 | ost2_learner_dashboard_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) — learner-dashboard fork `teak3_3_ost2-dashboard-customizations` (multi-select unenroll survey + current-grade banners + header labels); needs `tutor images build mfe` and a tutor-indigo without the old learner-dashboard patches |
-| ost2_mfe_bookworm_base | ● | ● | ● | `dev/`, `p/`, `beta/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`. dev=p 0.1.0; beta 0.2.0 adds the `OST2_MFE_NPM_TUNING` npm-throttle switch (true on beta) |
+| ost2_mfe_bookworm_base | ● | ● | ● | `dev/`, `p/`, `beta/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`. p=beta 0.2.0 (`OST2_MFE_NPM_TUNING` npm-throttle switch, true on both); dev 0.1.0 |
 | ost2_lil_stranger | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_inappropriate_content | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_missing_accomplishments | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
@@ -119,12 +119,11 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   newer variants (dev 2026-10-10, p and beta synced the same day): Country/Region is required
   at signup, and the authn fork branch `teak3_2_registration-age-country-help` shows grey help
   text under Age and Country while focused. The copies are now byte-identical (dev=p=beta).
-- **ost2_mfe_bookworm_base** — beta runs 0.2.0, dev and p run 0.1.0. 0.2.0 renders the
+- **ost2_mfe_bookworm_base** — p and beta run 0.2.0, dev runs 0.1.0. 0.2.0 renders the
   npm-throttle `ENV npm_config_maxsockets=4 …` line after the MFE Dockerfile's `FROM` when
   `OST2_MFE_NPM_TUNING` is true (default false), replacing the hand-inserted line that every
-  `tutor config save` wiped. beta sets it true, which renders byte-identically to the old
-  hand-edit, so the cached base layer is reused. p has the same hand-edit and should move to
-  0.2.0 with `tutor config save --set OST2_MFE_NPM_TUNING=true`; dev needs neither.
+  `tutor config save` wiped. p and beta set it true (p since 2026-10-10), which renders
+  byte-identically to the old hand-edit, so the cached base layer is reused; dev needs neither.
 - **ost2_ga4_conversions** — dev and p only (decided 2026-10-10); never install it on beta.
 
 ## What each plugin does
