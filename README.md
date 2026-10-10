@@ -73,6 +73,7 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_report_inappropriate_content | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_missing_accomplishments | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_unstarted_enrollment_guard | ● | ● | — | `dev/`, `p/` (dev=p) |
+| ost2_ga4_conversions | ● | — | — | `dev/` — GA4 conversion events for Google Ads; dev runs it validate-only with a dummy measurement id |
 | enable_sso | ? | ● | ● | `p/`, `beta/` (p=beta) |
 | set_default_enrollment | ? | ● | ○ | `p/` — beta's disabled copy differs and is not captured |
 | set_parental_consent_age_limit | ? | ● | ● | `p/`, `beta/` (p=beta) |
@@ -147,6 +148,17 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
 - **ost2_unstarted_enrollment_guard** — a learner actively enrolled in 5+ courses that are all
   still at 0% current grade (no downloadable certificate) is sent to
   `/too-many-unstarted-classes/` instead of enrolling in another; global staff exempt. LMS-only.
+- **ost2_ga4_conversions** — server-side GA4 events for Google Ads (Ad Grants) conversion tracking:
+  `sign_up` on account creation, `course_enroll` on every enrollment, and `first_enrollment` when it is
+  the learner's first-ever enrollment (params `course_id`, `course_number`). Hooks the `REGISTER_USER` and
+  `ENROLL_STATUS_CHANGE` signals, so every enroll path counts (About-page button, auto-enroll after
+  registering, Learning MFE "Enroll now"). Sent with the GA4 Measurement Protocol using the visitor's own
+  `_ga` / `_ga_<stream>` cookies, so GA joins it to the ad-click session; only for the learner's own request,
+  after the DB commit. Config: `OST2_GA4_CONV_MODE` (`off` | `validate` | `send`, default `validate` =
+  GA's validation server, nothing recorded), `OST2_GA4_CONV_MEASUREMENT_ID` (default: the LMS
+  `GOOGLE_ANALYTICS_4_ID`), `OST2_GA4_CONV_API_SECRET` (set on the box only, never commit). dev:
+  `validate` + dummy id `G-OST2DEVTEST`, so it can never write into p's GA property. LMS-only —
+  `tutor config save` + `tutor local restart lms`.
 - **enable_sso** — turn on third-party auth with the Google and GitHub OAuth2 backends (no
   credentials in this file).
 - **set_default_enrollment** — `COURSE_MODE_DEFAULTS` = free
