@@ -34,8 +34,8 @@ each box is exactly `common` (12) plus that box's directory. Contents were captu
 from the running boxes (`~/.local/share/tutor-plugins/`) on 2026-07-31; committed files are
 md5-identical to what is deployed. **p and beta were re-captured on 2026-10-10**: `common/` +
 `p/` and `common/` + `beta/` (12 + 21 = 33 each) are md5-identical to every plugin-root file
-that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`. Plugins present but disabled
-on a box are not captured.
+that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
+`sitemap_seo` v2 (34). Plugins present but disabled on a box are not captured.
 
 ## Enablement matrix
 
@@ -76,6 +76,7 @@ on a box are not captured.
 | enable_sso | ? | ● | ● | `p/`, `beta/` (p=beta) |
 | set_default_enrollment | ? | ● | ○ | `p/` — beta's disabled copy differs and is not captured |
 | set_parental_consent_age_limit | ? | ● | ● | `p/`, `beta/` (p=beta) |
+| sitemap_seo | — | ● | — | `p/` — v2, host-agnostic; never enable on dev |
 
 ● enabled · ○ present but **disabled** · — not installed · ? not verified
 
@@ -98,8 +99,7 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   byte-identical copy, in `common/`).
 - **disable_markdown_safemode** — enabled on all three with the same file; beta's old
   disabled 2024 copy has been replaced.
-- **p's disabled plugins (not captured)** — p also has `sitemap_seo.py`,
-  `disable_course_discovery.yml`, `enable_instructor_grade_report_generation.yml`,
+- **p's disabled plugins (not captured)** — p also has `disable_course_discovery.yml`, `enable_instructor_grade_report_generation.yml`,
   `set_PLATFORM_TWITTER_ACCOUNT.yml` and `YTAPI.yml` in its plugins root, all installed but
   **not enabled**. `YTAPI.yml` contains secrets: never commit it.
 - **beta's disabled plugins (not captured)** — `YTAPI.yml` (secrets), `custom_certificate.yml`
@@ -151,6 +151,13 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   credentials in this file).
 - **set_default_enrollment** — `COURSE_MODE_DEFAULTS` = free
   **Honor** mode (honor certificate), instead of stock audit.
+- **sitemap_seo** — LMS-served `/sitemap.xml` and `/robots.txt` (allow all + `Sitemap:` line).
+  The sitemap is built from the course catalog (cached 1 hour): `/`, `/courses`, `/tos`, and the
+  About page of every started, non-invitation-only course whose About page is public
+  (`catalog_visibility` `both` or `about`), with `<lastmod>` from the course overview. Host comes
+  from `LMS_ROOT_URL`. Replaces v1, a Caddy patch with a hand-written 30-class list frozen at
+  2026-05-23. Never enable on dev (p's data; should not be crawled). LMS-only —
+  `tutor config save` + `tutor local restart lms`.
 - **set_parental_consent_age_limit** — `PARENTAL_CONSENT_AGE_LIMIT = None` and
   `EMAIL_OPTIN_MINIMUM_AGE = None`, so learners with no year of birth are not forced to a
   private profile or opted out of email.
