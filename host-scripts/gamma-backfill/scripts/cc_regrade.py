@@ -6,6 +6,10 @@ downloadable certificate, the first rule that applies wins:
   1. beta override -> Gold: a certificate of the class is on a run where the learner has an active
      allowlist entry, and the (learner, class) pair is in beta_completion_pairs.tsv (derived from
      COMPLETED_BETA_CLASS_CANDIDATES.md by cc_beta_pairs.py);
+     also Gold: an allowlisted certificate created at or after ALLOWLIST_GOLD_FROM (env, UTC
+     'YYYY-MM-DD HH:MM:SS', the box's bridge cutover). From then on the bridge flags every
+     allowlisted certificate Gold live, whatever its note; older ones keep their grade (Veronica,
+     2026-10-05: new ones only). Unset = no cutover on this box yet;
      a pair Veronica decided (source "decision ...", from manual/beta_completion_decisions.tsv) is Gold
      even when its certificate isn't allowlisted, e.g. an earned certificate with no clicks before it;
   2. click timing: first "Mark as complete" click in the class (any run, courseware_studentmodule
@@ -18,6 +22,7 @@ Usage: cc_regrade.py EXTRACT_DIR beta_completion_pairs.tsv OUTDIR"""
 import collections, csv, datetime as dt, json, os, re, sys
 
 X, PAIRS, OUT = sys.argv[1], sys.argv[2], sys.argv[3]
+GOLD_FROM = os.environ.get('ALLOWLIST_GOLD_FROM')
 os.makedirs(OUT, exist_ok=True)
 WEEK = dt.timedelta(weeks=1)
 TIERS = ('gold', 'silver', 'bronze', 'plain')
@@ -122,8 +127,11 @@ for (uid, cls), cs in sorted(by_lc.items()):
     if before:
         start, end = before[0], (max(in_run) if in_run else before[-1])
         timing = band(end - start)
+    live_gold = GOLD_FROM and any(c['created_date'][:19] >= GOLD_FROM for c in allowlisted)
     if beta and allowlisted:
         tier, reason = 'gold', 'beta override'
+    elif live_gold:
+        tier, reason = 'gold', 'allowlisted after the cutover'
     elif decided:
         tier, reason = 'gold', 'decision'
     elif timing:
@@ -180,6 +188,7 @@ with open(os.path.join(OUT, 'plan.tsv'), 'w', newline='') as f:
 P = lambda n: format(n, ',')
 tc = collections.Counter(p['tier'] for p in plan)
 print('Course Completion tier regrade: DRY RUN (nothing written)')
+print('allowlisted certificates Gold from: %s' % (GOLD_FROM or 'never (ALLOWLIST_GOLD_FROM unset)'))
 print('site: %s gamma users, total points %s at %s UTC (APPLY asserts this)' % (P(int(site['users'])), P(int(site['total_points'])), site['at_utc']))
 print('classes %d (tier badges %d); downloadable certificates %s; learner-classes %s; certificates on untiered runs %d (%s)' % (
     len(classes), 4 * len(classes), P(len(certs)), P(len(plan)), sum(untiered.values()), ', '.join('%s %d' % (short(k), v) for k, v in untiered.most_common())))

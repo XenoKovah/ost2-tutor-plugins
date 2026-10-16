@@ -402,7 +402,9 @@ addresses). Tests: `cd host-scripts && python3 -m unittest -v test_ost2_completi
 The toolkit behind the 2026-10-02 RGG backfill on p (BACKFILLS.md §0-§8) and the daily
 flag-only anti-gaming report. On a box it lives flat in `~/gamma-backfill/`, i.e. the contents
 of `gamma-backfill/scripts/`. `scripts/` was captured from **p's `~/gamma-backfill/` on
-2026-10-16**: its 44 `*.py`/`*.sh`/`*.sql` files are md5-identical to p's. `scripts/dev-only/` (mirror-reset and validation helpers) and `tests/` come
+2026-10-16**: its 44 `*.py`/`*.sh`/`*.sql` files are md5-identical to p's, except that
+`cc_regrade.py` is newer here (it adds the `ALLOWLIST_GOLD_FROM` cutover, Veronica's
+2026-10-05 decision). `scripts/dev-only/` (mirror-reset and validation helpers) and `tests/` come
 from the local working copy and are not on p.
 
 The only scheduled job is the anti-gaming report (p crontab, 05:00 UTC daily). Everything else
