@@ -1,6 +1,9 @@
 """
-DEV COPY: pins teak3_5_timing-feedback-midclass-nudge, same as beta. The mid-class Timing Feedback
-nudge in it stays OFF here: only beta installs ost2_timing_feedback_midclass_nudge (its MFE_CONFIG flag).
+DEV COPY: pins teak3_6_unenrolled-public-view = teak3_5_timing-feedback-midclass-nudge (as on beta) + one
+commit: on a public course, a signed-in learner who is not enrolled gets the read-only public_view, no
+completion/position handler calls, and an "enroll" alert above every unit (pairs with edx-platform
+teak3_23_unenrolled_public_view). The mid-class Timing Feedback nudge stays OFF here: only beta installs
+ost2_timing_feedback_midclass_nudge (its MFE_CONFIG flag).
 
 Point the Learning MFE build at the OST2 fork branch that adds the Timing Feedback
 nudge to the certificate boxes (course home alert + progress-tab card) when a learner
@@ -20,7 +23,7 @@ from tutormfe.hooks import MFE_APPS
 __version__ = "0.1.0"
 
 _REPOSITORY = "https://github.com/XenoKovah/frontend-app-learning.git"
-_VERSION = "teak3_5_timing-feedback-midclass-nudge"
+_VERSION = "teak3_6_unenrolled-public-view"
 
 
 @MFE_APPS.add()
