@@ -75,6 +75,7 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_report_missing_accomplishments | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_unstarted_enrollment_guard | ● | ● | — | `dev/`, `p/` (dev=p) |
 | ost2_ga4_conversions | ● | ● | — | `dev/`, `p/` (dev=p) — GA4 conversion events for Google Ads; reports to the box's own GA4 property; mode + API secret are per-box config. dev and p only, **never beta** |
+| ost2_bulk_email_from | — | ● | ● | per-box — bulk-email From (p `noreply@`, beta `noreply2@`; never copy between boxes) |
 | enable_sso | ? | ● | ● | `p/`, `beta/` (p=beta) |
 | set_default_enrollment | ? | ● | ○ | `p/` — beta's disabled copy differs and is not captured |
 | set_parental_consent_age_limit | ? | ● | ● | `p/`, `beta/` (p=beta) |
@@ -126,6 +127,9 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   `tutor config save` wiped. p and beta set it true (p since 2026-10-10), which renders
   byte-identically to the old hand-edit, so the cached base layer is reused; dev needs neither.
 - **ost2_ga4_conversions** — dev and p only (decided 2026-10-10); never install it on beta.
+- **ost2_bulk_email_from** — p sends bulk email From `noreply@ost2.fyi`, beta From
+  `noreply2@ost2.fyi` (each box's own `SMTP_USERNAME`; added 2026-10-16). dev doesn't have it
+  and still sends From `CONTACT_EMAIL` (info@), which Gmail rewrites to `noreply@`.
 
 ## What each plugin does
 
@@ -135,6 +139,7 @@ per the `dev/` capture). Once dev is re-verified, the dev=p=beta rows are candid
   (`teak3_9_add-component-menu` on all three boxes).
 - **ost2_disable_survey_report** — disable the LMS Django-admin "Open edX Data Sharing Initiative" banner (`SURVEY_REPORT_ENABLE=False`).
 - **ost2_email_ratelimit** — `RateLimitedEmailBackend` to stay under Gmail send throttles.
+- **ost2_bulk_email_from** — set `BULK_EMAIL_DEFAULT_FROM_EMAIL` to the box's SMTP mailbox, so instructor bulk email is From the account that sends it instead of `CONTACT_EMAIL` (info@, which Gmail rewrote anyway because it is not a Send-mail-as alias). Transactional mail (`DEFAULT_FROM_EMAIL`) is unchanged. Settings-only — `tutor plugins enable` + restart lms-worker (and lms/cms).
 - **ost2_forum_sort_fix** — force-install the forum fork with the MySQL child-comment sort fix.
 - **ost2_handouts** — course handouts fix.
 - **password_policy** — `AUTH_PASSWORD_VALIDATORS` (min length 18, no complexity, max 128) + longer generated passwords so OAuth signups don't 400.
