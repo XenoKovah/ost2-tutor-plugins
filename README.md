@@ -24,6 +24,7 @@ dev/      dev.ost2.fyi extras + dev-specific variants
 p/        p.ost2.fyi   extras + p-specific variants
 beta/     beta.ost2.fyi extras + beta-specific variants
 host-scripts/  stdlib scripts run from cron on the Tutor HOST — NOT Tutor plugins
+               (gamma-backfill/ = the RGG backfill + daily anti-gaming toolkit)
 ```
 
 > **Never copy `host-scripts/` into the Tutor plugins root** — Tutor imports every `*.py`
@@ -395,6 +396,28 @@ python3 ~/ost2-host-scripts/ost2_completion_nudge.py --only-to xeno@ost2.fyi --u
 
 Do not put the `--send` cron on dev (it would only write files, and dev holds p's learners' real
 addresses). Tests: `cd host-scripts && python3 -m unittest -v test_ost2_completion_nudge`.
+
+### gamma-backfill/ — RGG badge backfills + the daily anti-gaming run
+
+The toolkit behind the 2026-10-02 RGG backfill on p (BACKFILLS.md §0-§8) and the daily
+flag-only anti-gaming report. On a box it lives flat in `~/gamma-backfill/`, i.e. the contents
+of `gamma-backfill/scripts/`. `scripts/` was captured from **p's `~/gamma-backfill/` on
+2026-10-16**: its 44 `*.py`/`*.sh`/`*.sql` files are md5-identical to p's. `scripts/dev-only/` (mirror-reset and validation helpers) and `tests/` come
+from the local working copy and are not on p.
+
+The only scheduled job is the anti-gaming report (p crontab, 05:00 UTC daily). Everything else
+is one-off and run by hand, each script dry-running unless told to apply:
+
+```
+0 5 * * * CONFIRM_HOST=p.ost2.fyi MAIL_TO=xeno@ost2.fyi bash /home/ubuntu/gamma-backfill/anti_gaming_daily.sh >> /home/ubuntu/anti-gaming/cron.log 2>&1
+```
+
+Install: `mkdir -p ~/gamma-backfill ~/anti-gaming && cp host-scripts/gamma-backfill/scripts/*.{py,sh,sql} ~/gamma-backfill/`.
+The scripts read MySQL and gamma credentials from `~/tutor-venv/bin/tutor config printvalue` at
+run time; nothing secret is stored in them. **Not in git, on purpose:** the per-learner inputs
+and outputs (`manual/*.txt|tsv` username lists, `exports/`, `backups/`, logs). They name real
+learners and this repository is public. Tests: `cd host-scripts/gamma-backfill && pytest -q tests/*.py`
+(`tests/gamma_dropins/` run inside a gamma checkout instead; see each file's docstring).
 
 ## Implementation notes
 
