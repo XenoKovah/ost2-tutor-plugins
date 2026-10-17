@@ -62,7 +62,9 @@ _OST2_HP_ITEMS = [
 
 _OST2_HP_CSS = (
     ":root{--bg:#fff;--fg:#1f2937;--muted:#5b6472;--card:#fff;--border:#d9dde3;--link:#0b6fa4;--err:#b00020;--btn:#0b6fa4;--btnfg:#fff}"
-    "@media (prefers-color-scheme: dark){:root{--bg:#111827;--fg:#e5e7eb;--muted:#9ca3af;--card:#1f2937;--border:#374151;--link:#7cc4ee;--err:#ff8a9b;--btn:#2b8cc4;--btnfg:#fff}}"
+    # Dark follows the site's light/dark toggle (Indigo's indigo-toggle-dark cookie), like every other
+    # page, rather than the OS setting; the colors are Indigo's dark-theme ones.
+    ":root.dark{--bg:#0d0d0e;--fg:#f8f8f8;--muted:#9ca3af;--card:#292a2c;--border:#4b4f55;--link:#aec7f6;--err:#ff8a9b;--btn:#aec7f6;--btnfg:#0d0d0e}"
     "body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}"
     "main{max-width:720px;margin:0 auto;padding:32px 16px}"
     "h1{font-size:1.6rem;margin:0 0 1rem}"
@@ -81,15 +83,18 @@ _OST2_HP_CSS = (
 )
 
 
-def _ost2_hp_shell(title, body):
+def _ost2_hp_shell(request, title, body):
     from django.utils.html import escape
+    dark = request.COOKIES.get("indigo-toggle-dark") == "dark"
     return (
-        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<!doctype html><html lang="en"@@CLASS@@><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<meta name="color-scheme" content="light dark">'
+        '<meta name="color-scheme" content="@@SCHEME@@">'
         '<title>@@TITLE@@</title><style>@@CSS@@</style></head>'
         '<body><main>@@BODY@@</main></body></html>'
-    ).replace("@@TITLE@@", escape(title)).replace("@@CSS@@", _OST2_HP_CSS).replace("@@BODY@@", body)
+    ).replace("@@CLASS@@", ' class="dark"' if dark else "").replace("@@SCHEME@@", "dark" if dark else "light").replace(
+        "@@TITLE@@", escape(title)
+    ).replace("@@CSS@@", _OST2_HP_CSS).replace("@@BODY@@", body)
 
 
 def _ost2_hp_account_url(request):
@@ -210,7 +215,7 @@ def _ost2_hp_view(request):
                     'We will reply to the email address on your account.</p>'
                     '<p><a href="/help">Back to Help</a></p>'
                 )
-                resp = HttpResponse(_ost2_hp_shell("Help request sent", done))
+                resp = HttpResponse(_ost2_hp_shell(request, "Help request sent", done))
                 resp["Cache-Control"] = "no-store"
                 return resp
     elif request.method == "GET":
@@ -222,7 +227,7 @@ def _ost2_hp_view(request):
             url = ref
 
     body = _ost2_hp_page(request, get_token(request), url, issue, error)
-    resp = HttpResponse(_ost2_hp_shell("Help", body), status=400 if error else 200)
+    resp = HttpResponse(_ost2_hp_shell(request, "Help", body), status=400 if error else 200)
     resp["Cache-Control"] = "no-store"
     return resp
 

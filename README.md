@@ -73,7 +73,7 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_lil_stranger | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_inappropriate_content | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_missing_accomplishments | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
-| ost2_help_page | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) — `/help` page (common problems + "Something else" form emailing xeno@ost2.fyi); sets `MFE_CONFIG["SUPPORT_URL"]` so the MFE header Help link goes there |
+| ost2_help_page | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=beta; p = the older copy whose dark mode follows the OS, not the site toggle) — `/help` page (common problems + "Something else" form emailing xeno@ost2.fyi); sets `MFE_CONFIG["SUPPORT_URL"]` so the MFE header Help link goes there |
 | ost2_unstarted_enrollment_guard | ● | ● | — | `dev/`, `p/` (dev=p) |
 | ost2_ga4_conversions | ● | ● | — | `dev/`, `p/` (dev=p) — GA4 conversion events for Google Ads; reports to the box's own GA4 property; mode + API secret are per-box config. dev and p only, **never beta** |
 | ost2_bulk_email_from | — | ● | ● | per-box — bulk-email From (p `noreply@`, beta `noreply2@`; never copy between boxes) |
