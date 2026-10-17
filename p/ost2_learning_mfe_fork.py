@@ -17,7 +17,7 @@ from tutormfe.hooks import MFE_APPS
 __version__ = "0.1.0"
 
 _REPOSITORY = "https://github.com/XenoKovah/frontend-app-learning.git"
-_VERSION = "teak3_5_timing-feedback-midclass-nudge"
+_VERSION = "teak3_6_unenrolled-public-view"
 
 
 @MFE_APPS.add()

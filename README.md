@@ -66,14 +66,14 @@ that box has *enabled* in `~/tutor-venv/bin/tutor plugins list`; p then gained
 | ost2_search_unreleased_for_staff | — | — | ● | `beta/` |
 | disable_markdown_safemode | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_markdown_xblock_parse_xml | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) — needs `tutor images build openedx` |
-| ost2_learning_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — all `teak3_5_timing-feedback-midclass-nudge` (copies differ only in header comments; mid-class nudge only active where the flag plugin is); needs `tutor images build mfe` |
+| ost2_learning_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` — dev + p `teak3_6_unenrolled-public-view` (teak3_5 + signed-in unenrolled learners get the read-only public_view; pairs with edx-platform teak3_23), beta `teak3_5_timing-feedback-midclass-nudge` (copies differ only in header comments; mid-class nudge only active where the flag plugin is); needs `tutor images build mfe` |
 | ost2_timing_feedback_midclass_nudge | — | — | ● | `beta/` only — MFE_CONFIG flag for the mid-class Timing Feedback nudge (TF is mandatory on beta); never on dev/p |
 | ost2_learner_dashboard_mfe_fork | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) — learner-dashboard fork `teak3_3_ost2-dashboard-customizations` (multi-select unenroll survey + current-grade banners + header labels); needs `tutor images build mfe` and a tutor-indigo without the old learner-dashboard patches |
 | ost2_mfe_bookworm_base | ● | ● | ● | `dev/`, `p/`, `beta/` — MFE image on node bookworm (bullseye apt is 404 since EOL); survives `config save`. p=beta 0.2.0 (`OST2_MFE_NPM_TUNING` npm-throttle switch, true on both); dev 0.1.0 |
 | ost2_lil_stranger | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_inappropriate_content | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
 | ost2_report_missing_accomplishments | ● | ● | ● | `dev/`, `p/`, `beta/` (dev=p=beta) |
-| ost2_help_page | ● | — | — | `dev/` — `/help` page (common problems + "Something else" form emailing xeno@ost2.fyi); sets `MFE_CONFIG["SUPPORT_URL"]` so the MFE header Help link goes there |
+| ost2_help_page | ● | ● | — | `dev/`, `p/` (identical) — `/help` page (common problems + "Something else" form emailing xeno@ost2.fyi); sets `MFE_CONFIG["SUPPORT_URL"]` so the MFE header Help link goes there |
 | ost2_unstarted_enrollment_guard | ● | ● | — | `dev/`, `p/` (dev=p) |
 | ost2_ga4_conversions | ● | ● | — | `dev/`, `p/` (dev=p) — GA4 conversion events for Google Ads; reports to the box's own GA4 property; mode + API secret are per-box config. dev and p only, **never beta** |
 | ost2_bulk_email_from | — | ● | ● | per-box — bulk-email From (p `noreply@`, beta `noreply2@`; never copy between boxes) |
