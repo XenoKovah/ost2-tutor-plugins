@@ -14,7 +14,7 @@ COURSE = "course-v1:OpenSecurityTraining2+Arch1001_x86-64_Asm+2021_v1"
 
 
 def log_line(when, reasons=(), other="", course=COURSE, name="unenrollment_reason.selected",
-             user_id=5, event=None):
+             user_id=5, event=None, username="someone"):
     """A tracking.log line shaped exactly like the real /event records on dev."""
     if event is None:
         event = {"course_id": course, "reasons": [{"key": k, "label": l} for k, l in reasons],
@@ -23,7 +23,7 @@ def log_line(when, reasons=(), other="", course=COURSE, name="unenrollment_reaso
         "name": name,
         "context": {"user_id": user_id, "path": "/event", "course_id": course,
                     "org_id": "OpenSecurityTraining2", "enterprise_uuid": ""},
-        "username": "someone", "session": "abc", "ip": "203.0.113.9", "agent": "x", "host": "dev.ost2.fyi",
+        "username": username, "session": "abc", "ip": "203.0.113.9", "agent": "x", "host": "dev.ost2.fyi",
         "referer": "https://apps.dev.ost2.fyi/", "accept_language": "en", "event": event,
         "time": when.isoformat(), "event_type": name, "event_source": "browser",
         "page": "https://apps.dev.ost2.fyi/learner-dashboard/",
@@ -129,7 +129,7 @@ class CollectTests(unittest.TestCase):
 class RenderTests(unittest.TestCase):
     def responses(self):
         mk = lambda day, reasons, other="", user=5: report.parse_record(  # noqa: E731
-            log_line(at(day), reasons, other, user_id=user))
+            log_line(at(day), reasons, other, user_id=user, username="learner%d" % user))
         return [mk(2, [TIME, EASY], user=5), mk(3, [TIME], other="needed the slot", user=6),
                 mk(4, [ZERO], user=5)]
 
@@ -172,10 +172,87 @@ class RenderTests(unittest.TestCase):
         self.assertIn("(1 response)", subject)
         self.assertIn("1 response from 1 learner, 2 reason selections in total.", body)
 
-    def test_no_learner_identity_leaks_into_the_email(self):
+    def test_each_response_line_names_the_username(self):
         _, body = report.render(self.responses(), at(1, 8), at(8, 8), "dev.ost2.fyi")
-        for secret in ("someone", "203.0.113.9"):
-            self.assertNotIn(secret, body)
+        self.assertIn("  2026-10-02 12:00 UTC  Arch1001_x86-64_Asm (2021_v1) learner5\n", body)
+        self.assertIn("  2026-10-03 12:00 UTC  Arch1001_x86-64_Asm (2021_v1) learner6\n", body)
+        self.assertIn("  2026-10-04 12:00 UTC  Arch1001_x86-64_Asm (2021_v1) learner5\n", body)
+
+    def test_free_text_entries_name_the_username(self):
+        _, body = report.render(self.responses(), at(1, 8), at(8, 8), "dev.ost2.fyi")
+        self.assertIn("  [2026-10-03 12:00 UTC] Arch1001_x86-64_Asm (2021_v1) learner6\n", body)
+
+    def test_only_the_username_identifies_the_learner(self):
+        _, body = report.render(self.responses(), at(1, 8), at(8, 8), "dev.ost2.fyi")
+        self.assertNotIn("203.0.113.9", body)  # no IP
+        self.assertNotIn("user id", body)  # the id is only a fallback
+
+    def test_user_id_is_the_fallback_when_the_record_has_no_username(self):
+        r = report.parse_record(log_line(at(2), [TIME], user_id=9, username=""))
+        _, body = report.render([r], at(1, 8), at(8, 8), "h")
+        self.assertIn("(2021_v1) user id 9\n", body)
+
+    def test_by_course_lists_reason_counts_under_each_course(self):
+        other = "Not my focus as of now"
+        mk = lambda day, reasons, other="", course=COURSE: report.parse_record(  # noqa: E731
+            log_line(at(day), reasons, other, course=course))
+        arch2001 = "course-v1:OpenSecurityTraining2+Arch2001_x86-64_OS_Internals+2024_v1"
+        responses = [mk(2, [ZERO], course=arch2001), mk(3, [ZERO], course=arch2001),
+                     mk(4, [ZERO], course=arch2001), mk(5, [], other, course=arch2001),
+                     mk(6, [], other, course=arch2001), mk(7, [TIME])]
+        _, body = report.render(responses, at(1, 8), at(8, 8), "h")
+        self.assertIn(
+            "  5  Arch2001_x86-64_OS_Internals (2024_v1)\n"
+            "       3  " + ZERO[1] + "\n"
+            "       2  Other: " + other + "\n"
+            "  1  Arch1001_x86-64_Asm (2021_v1)\n"
+            "       1  " + TIME[1] + "\n", body)
+
+    def test_by_course_shows_the_learners_own_words_and_merges_identical_ones(self):
+        event = lambda text: {"course_id": COURSE, "other": "", "reasons": [  # noqa: E731
+            {"key": "broken", "label": BROKEN[1], "details": text}]}
+        responses = [report.parse_record(log_line(at(2), event=event("video  stalls"))),
+                     report.parse_record(log_line(at(3), event=event("video stalls"))),
+                     report.parse_record(log_line(at(4), event=event("login failed")))]
+        _, body = report.render(responses, at(1, 8), at(8, 8), "h")
+        self.assertIn("       2  Something was broken: video stalls\n", body)
+        self.assertIn("       1  Something was broken: login failed\n", body)
+
+    def all_time(self, responses, first="2026-09-20T09:00:00+00:00"):
+        return {"through": at(8, 8), "first_response": first, "responses": len(responses),
+                "courses": report.tally(responses)}
+
+    def test_all_time_section_comes_last_with_the_same_layout(self):
+        earlier = [report.parse_record(log_line(at(1), [ZERO])) for _ in range(3)]
+        week = self.responses()
+        _, body = report.render(week, at(1, 8), at(8, 8), "h", self.all_time(earlier + week))
+        head, tail = body.split("\nBY COURSE (ALL TIME)\n")
+        self.assertTrue(tail.startswith("--------------------\n6 responses since 2026-09-20, this period included."))
+        self.assertLess(head.index("ALL RESPONSES"), len(head))  # the weekly sections come first
+        self.assertIn("  6  Arch1001_x86-64_Asm (2021_v1)\n", tail)
+        self.assertIn("       4  " + ZERO[1] + "\n", tail)  # 3 earlier + 1 this week
+        self.assertIn("       2  " + TIME[1] + "\n", tail)
+        self.assertTrue(body.endswith("\n"))
+
+    def test_all_time_section_is_still_sent_for_a_week_without_answers(self):
+        earlier = [report.parse_record(log_line(at(1), [TIME]))]
+        _, body = report.render([], at(1, 8), at(8, 8), "h", self.all_time(earlier))
+        self.assertIn("No unenrollment survey answers were submitted in this period.", body)
+        self.assertIn("BY COURSE (ALL TIME)\n--------------------\n1 response since 2026-09-20", body)
+
+    def test_all_time_section_with_nothing_logged_yet(self):
+        _, body = report.render([], at(1, 8), at(8, 8), "h", self.all_time([], first=None))
+        self.assertIn("No unenrollment survey answers have been logged yet.", body)
+
+    def test_no_all_time_section_unless_asked_for(self):
+        _, body = report.render(self.responses(), at(1, 8), at(8, 8), "h")
+        self.assertNotIn("ALL TIME", body)
+
+    def test_tally_merges_into_existing_totals(self):
+        totals = report.tally(self.responses())
+        report.tally(self.responses()[:1], totals)
+        self.assertEqual(totals[COURSE]["responses"], 4)
+        self.assertEqual(totals[COURSE]["reasons"][TIME[1]], 3)
 
     def test_course_label(self):
         self.assertEqual(report.course_label(COURSE), "Arch1001_x86-64_Asm (2021_v1)")
@@ -183,7 +260,9 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(report.course_label("weird"), "weird")
 
 
-class MainTests(unittest.TestCase):
+class RunBase(unittest.TestCase):
+    """A temp log dir (answers on Oct 2 and Oct 9) and state dir to drive main() against."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -201,6 +280,8 @@ class MainTests(unittest.TestCase):
     def run_main(self, *extra):
         return report.main(self.base + list(extra))
 
+
+class MainTests(RunBase):
     def test_send_advances_marker_and_next_run_starts_there(self):
         with mock.patch.object(report, "send") as send, mock.patch.object(report, "utcnow", return_value=at(8, 8)):
             self.assertEqual(self.run_main(), 0)
@@ -212,8 +293,9 @@ class MainTests(unittest.TestCase):
         with mock.patch.object(report, "send") as send, mock.patch.object(report, "utcnow", return_value=at(15, 8)):
             self.assertEqual(self.run_main(), 0)
         self.assertIn("(1 response)", send.call_args[0][2])  # now it is the Oct 9 answer
-        self.assertIn(EASY[1], send.call_args[0][3])
-        self.assertNotIn(TIME[1], send.call_args[0][3])
+        weekly = send.call_args[0][3].split("BY COURSE (ALL TIME)")[0]  # ALL TIME rightly has both
+        self.assertIn(EASY[1], weekly)
+        self.assertNotIn(TIME[1], weekly)
 
     def test_dry_run_prints_and_saves_nothing(self):
         with mock.patch.object(report, "send") as send, mock.patch.object(report, "utcnow", return_value=at(8, 8)):
@@ -243,8 +325,72 @@ class MainTests(unittest.TestCase):
         with mock.patch.object(report, "send") as send, mock.patch.object(report, "utcnow", return_value=at(10, 0)):
             self.assertEqual(self.run_main(), 0)
         # window Oct 3 00:00 -> Oct 10 00:00: only the Oct 9 answer
-        self.assertIn(EASY[1], send.call_args[0][3])
-        self.assertNotIn(TIME[1], send.call_args[0][3])
+        weekly = send.call_args[0][3].split("BY COURSE (ALL TIME)")[0]
+        self.assertIn(EASY[1], weekly)
+        self.assertNotIn(TIME[1], weekly)
+
+
+class AllTimeTests(RunBase):
+    """The running ALL TIME totals kept in <state-dir>/all_time.json."""
+
+    def saved(self):
+        return report.read_all_time(self.state)
+
+    def sent_body(self, now, *extra):
+        with mock.patch.object(report, "send") as send, mock.patch.object(report, "utcnow", return_value=now):
+            self.assertEqual(self.run_main(*extra), 0)
+        return send.call_args[0][3]
+
+    def test_first_run_seeds_from_every_log_and_saves(self):
+        body = self.sent_body(at(15, 8))  # window Oct 8 -> 15 holds only the Oct 9 answer
+        self.assertIn("(ALL TIME)", body)
+        self.assertIn("2 responses since 2026-10-02, this period included.", body)
+        saved = self.saved()
+        self.assertEqual((saved["responses"], saved["through"]), (2, at(15, 8)))
+        self.assertEqual(saved["first_response"], at(2).isoformat())
+
+    def test_next_run_adds_only_the_new_period_and_does_not_rescan(self):
+        self.sent_body(at(8, 8))
+        with open(os.path.join(self.logs, "tracking.log"), "a") as handle:
+            handle.write(log_line(at(10), [TIME]))
+        with mock.patch.object(report, "collect", wraps=report.collect) as collect:
+            body = self.sent_body(at(15, 8))
+        self.assertEqual(collect.call_count, 1)  # the weekly read doubled as the ALL TIME update
+        self.assertEqual(self.saved()["responses"], 3)  # Oct 2 (seed) + Oct 9 + Oct 10
+        self.assertIn("3 responses since 2026-10-02", body)
+        self.assertIn("       2  " + TIME[1] + "\n", body.split("(ALL TIME)")[1])
+
+    def test_dry_run_and_failed_send_do_not_save(self):
+        with mock.patch.object(report, "utcnow", return_value=at(8, 8)):
+            self.run_main("--dry-run")
+        self.assertIsNone(self.saved())
+        with mock.patch.object(report, "send", side_effect=OSError("smtp down")), \
+                mock.patch.object(report, "utcnow", return_value=at(8, 8)), \
+                mock.patch.object(report.traceback, "print_exc"):
+            self.assertEqual(self.run_main(), 1)
+        self.assertIsNone(self.saved())
+
+    def test_replaying_a_period_never_double_counts(self):
+        self.sent_body(at(15, 8))
+        body = self.sent_body(at(16, 8), "--since", "2026-10-01T00:00:00Z")
+        self.assertEqual(self.saved()["responses"], 2)
+        self.assertIn("2 responses since 2026-10-02", body)
+
+    def test_rebuild_reseeds_from_the_logs(self):
+        self.sent_body(at(15, 8))
+        report.write_all_time(self.state, dict(self.saved(), responses=99))
+        self.sent_body(at(16, 8), "--rebuild-all-time")
+        self.assertEqual(self.saved()["responses"], 2)
+
+    def test_unreadable_state_fails_loudly_instead_of_reseeding(self):
+        os.makedirs(self.state)
+        with open(os.path.join(self.state, report.ALL_TIME), "w") as handle:
+            handle.write("{not json")
+        with mock.patch.object(report, "send") as send, mock.patch.object(report, "utcnow", return_value=at(8, 8)), \
+                mock.patch.object(report.traceback, "print_exc"):
+            self.assertEqual(self.run_main(), 1)
+        send.assert_not_called()
+        self.assertIn("--rebuild-all-time", open(os.path.join(self.state, report.FAIL_MARKER)).read())
 
 
 class SendTests(unittest.TestCase):

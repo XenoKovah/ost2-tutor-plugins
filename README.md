@@ -296,8 +296,14 @@ endpoint so it lands in `tracking.log` as an `unenrollment_reason.selected` reco
 that MFE is deployed nothing records these answers — the stock Segment tracker is a no-op
 because `SEGMENT_KEY` is empty.) Python 3 standard library only; reads SMTP settings
 (`SMTP_*`, `CONTACT_EMAIL`) from `~/tutor-venv/bin/tutor config printvalue`, so it sends
-through the same Gmail relay as the LMS. The email names courses and reasons only — no
-learner identity. It sends even when the week was empty, so silence means the job is broken.
+through the same Gmail relay as the LMS. Each response line shows the learner's username (no
+email, user id or IP); BY COURSE lists the reasons given under each course. It sends even when
+the week was empty, so silence means the job is broken.
+
+The last section, BY COURSE (ALL TIME), is the same breakdown over every answer ever logged.
+Running totals are kept in `~/.local/share/ost2-unenroll-report/all_time.json` and each run adds
+only the period since the file's `through` time. The first run with no file seeds it from every
+`tracking.log` on disk (a one-off full scan); `--rebuild-all-time` discards the file and re-seeds.
 
 Window = end of the last successful report (`~/.local/share/ost2-unenroll-report/last_report_end`)
 → now, so a missed week is caught up rather than lost; the first run covers 7 days. On a

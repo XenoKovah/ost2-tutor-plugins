@@ -18,8 +18,16 @@ run covers the previous 7 days.  The marker only advances after the email was ac
 SMTP server.  `--dry-run` prints the email and touches nothing.  An email is sent even when
 there are no answers, so a silent inbox means the job is broken, not that nobody unenrolled.
 
-The email carries no learner identity (no username / email / user id): reasons are reported
-by course and in aggregate only.
+The email names the learner (username) on each response, but carries no email address, user id
+or IP.  BY COURSE lists, under each course, how many times each reason was given for it.
+
+BY COURSE (ALL TIME) at the end is the same breakdown over every answer ever logged.  The running
+totals live in <state-dir>/all_time.json and each run only adds the period since the file's
+"through" time, so tracking.log is never re-read in full.  The first run (no file yet) seeds it
+from every tracking.log still on disk -- a one-off full scan that can take minutes on a big
+prod log; if that history is later rotated away the JSON is the only copy, so keep it.
+`--rebuild-all-time` discards the file and re-seeds from the logs.  Like the weekly marker, the
+file only advances after the email was accepted by the SMTP server.
 """
 import argparse
 import collections
@@ -41,6 +49,8 @@ DEFAULT_LOG_DIR = os.path.join(TUTOR_ROOT, "data", "lms", "logs")
 DEFAULT_STATE_DIR = os.path.expanduser("~/.local/share/ost2-unenroll-report")
 DEFAULT_TUTOR = os.path.expanduser("~/tutor-venv/bin/tutor")
 MARKER = "last_report_end"
+ALL_TIME = "all_time.json"
+EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
 FAIL_MARKER = "last_failure"
 
 
@@ -123,6 +133,7 @@ def parse_record(line):
         "details": details,
         "other": other,
         "learner": record.get("context", {}).get("user_id") or record.get("username"),
+        "username": (record.get("username") or record.get("context", {}).get("username") or "").strip(),
     }
 
 
@@ -148,6 +159,64 @@ def course_label(course_id):
     return course_id or "(unknown course)"
 
 
+def who(response):
+    """The username that took the action; falls back to the user id if the record had none."""
+    if response["username"]:
+        return response["username"]
+    if response["learner"] is not None:
+        return "user id %s" % response["learner"]
+    return "(unknown user)"
+
+
+def reason_texts(response):
+    """Each reason as shown to the reader; ones carrying the learner's own words include them."""
+    items = ["%s: %s" % (label, response["details"][label]) if label in response["details"] else label
+             for label in response["reasons"]]
+    if response["other"]:
+        items.append("Other: " + " ".join(response["other"].split()))
+    return items
+
+
+def tally(responses, courses=None):
+    """Add responses to {course_id: {"responses": n, "reasons": {text: n}}} (JSON-friendly)."""
+    courses = {} if courses is None else courses
+    for r in responses:
+        entry = courses.setdefault(r["course_id"], {"responses": 0, "reasons": {}})
+        entry["responses"] += 1
+        for text in reason_texts(r):
+            entry["reasons"][text] = entry["reasons"].get(text, 0) + 1
+    return courses
+
+
+def by_course_lines(courses):
+    """Per course: its response count, then each reason given for it, indented underneath."""
+    merged = {}
+    for course_id, entry in courses.items():
+        slot = merged.setdefault(course_label(course_id),
+                                 {"responses": 0, "reasons": collections.Counter()})
+        slot["responses"] += entry["responses"]
+        slot["reasons"].update(entry["reasons"])
+    width = len(str(max(slot["responses"] for slot in merged.values())))
+    lines = []
+    for label, slot in sorted(merged.items(), key=lambda item: (-item[1]["responses"], item[0])):
+        lines.append("  %*d  %s" % (width, slot["responses"], label))
+        reasons = slot["reasons"]
+        sub_width = len(str(max(reasons.values())))
+        for reason, count in sorted(reasons.items(), key=lambda item: (-item[1], item[0])):
+            lines.append("  %s    %*d  %s" % (" " * width, sub_width, count, reason))
+    return lines
+
+
+def all_time_lines(all_time):
+    lines = ["", "BY COURSE (ALL TIME)", "--------------------"]
+    if not all_time["responses"]:
+        return lines + ["No unenrollment survey answers have been logged yet."]
+    since = all_time["first_response"][:10]
+    lines.append("%d response%s since %s, this period included.  Same layout as BY COURSE above." % (
+        all_time["responses"], "" if all_time["responses"] == 1 else "s", since))
+    return lines + by_course_lines(all_time["courses"])
+
+
 def fmt_day(moment):
     return moment.strftime("%Y-%m-%d")
 
@@ -156,8 +225,8 @@ def fmt_moment(moment):
     return moment.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def render(responses, since, until, host):
-    """Returns (subject, body)."""
+def render(responses, since, until, host, all_time=None):
+    """Returns (subject, body).  `all_time` (see update_all_time) adds the ALL TIME section."""
     count = len(responses)
     noun = "response" if count == 1 else "responses"
     subject = "[OST2 %s] Weekly unenrollment reasons: %s to %s (%d %s)" % (
@@ -171,6 +240,8 @@ def render(responses, since, until, host):
     if not responses:
         lines.append("No unenrollment survey answers were submitted in this period.")
         lines.append("(Learners who press 'Skip survey' are not counted here.)")
+        if all_time:
+            lines += all_time_lines(all_time)
         return subject, "\n".join(lines) + "\n"
 
     learners = {r["learner"] for r in responses if r["learner"] is not None}
@@ -191,17 +262,16 @@ def render(responses, since, until, host):
     for reason, n in sorted(by_reason.items(), key=lambda item: (-item[1], item[0])):
         lines.append("  %*d  %s" % (width, n, reason))
 
-    by_course = collections.Counter(course_label(r["course_id"]) for r in responses)
-    lines += ["", "BY COURSE", "---------"]
-    width = len(str(max(by_course.values())))
-    for course, n in sorted(by_course.items(), key=lambda item: (-item[1], item[0])):
-        lines.append("  %*d  %s" % (width, n, course))
+    lines += ["", "BY COURSE", "---------",
+              "(a response can give several reasons, so the reasons listed under a course can",
+              " add up to more than its response count)"]
+    lines += by_course_lines(tally(responses))
 
     written = [r for r in responses if r["details"] or r["other"]]
     if written:
         lines += ["", "FREE-TEXT ANSWERS", "-----------------"]
         for r in written:
-            lines.append("  [%s] %s" % (fmt_moment(r["time"]), course_label(r["course_id"])))
+            lines.append("  [%s] %s %s" % (fmt_moment(r["time"]), course_label(r["course_id"]), who(r)))
             for label, text in r["details"].items():
                 lines.append('    %s: "%s"' % (label, text))
             if r["other"]:
@@ -209,12 +279,10 @@ def render(responses, since, until, host):
 
     lines += ["", "ALL RESPONSES (oldest first)", "----------------------------"]
     for r in responses:
-        picked = ["%s: %s" % (label, r["details"][label]) if label in r["details"] else label
-                  for label in r["reasons"]]
-        if r["other"]:
-            picked.append("Other: " + " ".join(r["other"].split()))
-        lines.append("  %s  %s" % (fmt_moment(r["time"]), course_label(r["course_id"])))
-        lines.extend("      - " + item for item in picked)
+        lines.append("  %s  %s %s" % (fmt_moment(r["time"]), course_label(r["course_id"]), who(r)))
+        lines.extend("      - " + item for item in reason_texts(r))
+    if all_time:
+        lines += all_time_lines(all_time)
     return subject, "\n".join(lines) + "\n"
 
 
@@ -288,6 +356,51 @@ def write_marker(state_dir, moment):
     os.replace(tmp, os.path.join(state_dir, MARKER))
 
 
+def read_all_time(state_dir):
+    """The saved running totals, or None if there are none yet."""
+    path = os.path.join(state_dir, ALL_TIME)
+    try:
+        with open(path) as handle:
+            data = json.load(handle)
+        data["through"] = parse_time(data["through"])
+        return data
+    except FileNotFoundError:
+        return None
+    except (ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError("%s is unreadable (%s): restore it, or run with --rebuild-all-time "
+                           "to re-seed it from the tracking logs" % (path, exc))
+
+
+def write_all_time(state_dir, data):
+    os.makedirs(state_dir, exist_ok=True)
+    tmp = os.path.join(state_dir, ALL_TIME + ".tmp")
+    with open(tmp, "w") as handle:
+        json.dump(dict(data, through=data["through"].isoformat()), handle,
+                  indent=1, sort_keys=True, ensure_ascii=False)
+        handle.write("\n")
+    os.replace(tmp, os.path.join(state_dir, ALL_TIME))
+
+
+def update_all_time(args, responses, since, until):
+    """Running totals brought up to `until`: the saved ones plus only what is new since them.
+
+    Returns (totals, changed); nothing is saved here.  `responses` are those of [since, until),
+    reused when that is exactly the new stretch (the normal weekly run) so the log is read once.
+    """
+    state = None if args.rebuild_all_time else read_all_time(args.state_dir)
+    if state is None:
+        state = {"through": EPOCH, "first_response": None, "responses": 0, "courses": {}}
+    if state["through"] >= until:
+        return state, False
+    new = responses if state["through"] == since else collect(args.log_dir, state["through"], until)
+    tally(new, state["courses"])
+    state["responses"] += len(new)
+    if new and not state["first_response"]:
+        state["first_response"] = new[0]["time"].isoformat()
+    state["through"] = until
+    return state, True
+
+
 def record_failure(state_dir, text):
     os.makedirs(state_dir, exist_ok=True)
     with open(os.path.join(state_dir, FAIL_MARKER), "w") as handle:
@@ -316,13 +429,16 @@ def run(args):
 
     responses = collect(args.log_dir, since, until)
     host = args.host_label or tutor_value(args.tutor, "LMS_HOST")
-    subject, body = render(responses, since, until, host)
+    all_time, all_time_changed = update_all_time(args, responses, since, until)
+    subject, body = render(responses, since, until, host, all_time)
 
     if args.dry_run:
         print("To: %s\nSubject: %s\n\n%s" % (args.to, subject, body))
         return 0
 
     send(smtp_settings(args), args.to, subject, body)
+    if all_time_changed:
+        write_all_time(args.state_dir, all_time)
     if not args.since:  # a manual --since replay must not move the weekly window
         write_marker(args.state_dir, until)
     clear_failure(args.state_dir)
@@ -341,6 +457,8 @@ def parser():
     ap.add_argument("--since", help="ISO time; overrides the marker and never advances it")
     ap.add_argument("--until", help="ISO time; default now")
     ap.add_argument("--dry-run", action="store_true", help="print the email; send nothing, save nothing")
+    ap.add_argument("--rebuild-all-time", action="store_true",
+                    help="discard the saved ALL TIME totals and re-seed them from the tracking logs")
     ap.add_argument("--host-label", help="name shown in the subject (default: tutor LMS_HOST)")
     ap.add_argument("--sender", help="From address (default: tutor CONTACT_EMAIL)")
     ap.add_argument("--smtp-host", help="override Tutor's SMTP settings (testing)")
