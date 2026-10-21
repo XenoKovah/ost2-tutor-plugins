@@ -21,12 +21,19 @@ The Certificate column also flags certs granted by a CERTIFICATE EXCEPTION
 (the user is on the course CertificateAllowlist, i.e. granted regardless of
 grade) vs. earned by meeting the grade requirement.
 
-Implementation: the view + admin-URL registration are injected into the LMS
+Implementation: the view + URL registration are injected into the LMS
 production settings via the `openedx-lms-production-settings` patch (the settings
 dir is bind-mounted, so this needs only `tutor config save` + `tutor local
 restart lms` -- NO image rebuild). Auth is inherited from Django admin
 (`admin.site.admin_view` -> active staff only; anonymous users are redirected to
 the admin login).
+
+The route is inserted at the FRONT of the root URLconf's urlpatterns on the first
+request_started, the same way ost2_help_page & co. register their pages. (Up to
+1.4.0 it monkeypatched AdminSite.get_urls instead, but the other plugins' earlier
+request_started receivers import the root URLconf first, which evaluates
+admin.site.urls before the patch landed -- so the page 404'd while the log still
+said "installed".)
 
 The injected code is deliberately free of Jinja-special sequences ({{, {% , {#)
 so it survives tutor's Jinja rendering of patch strings unchanged (same
@@ -41,7 +48,7 @@ Deploy:
 """
 from tutor import hooks
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 _CODE = '''
 # ============================================================================
@@ -236,19 +243,16 @@ def _ost2_gl_page(request):
 
 
 def _ost2_gl_install():
+    import importlib
+    from django.conf import settings
     from django.contrib import admin
     from django.urls import path, reverse
     site = admin.site
     if getattr(site, "_ost2_gl_installed", False):
         return
-    wrapped = site.admin_view(_ost2_gl_page)
-    _ost2_gl_orig_get_urls = site.get_urls
-
-    def _ost2_gl_get_urls():
-        extra = [path("student-grade-lookup/", wrapped, name="ost2_student_grade_lookup")]
-        return extra + _ost2_gl_orig_get_urls()
-
-    site.get_urls = _ost2_gl_get_urls
+    urls = importlib.import_module(settings.ROOT_URLCONF)
+    urls.urlpatterns.insert(0, path(
+        "admin/student-grade-lookup/", site.admin_view(_ost2_gl_page), name="ost2_student_grade_lookup"))
 
     # Surface a link on the admin index page + nav sidebar so the tool is
     # discoverable (otherwise it is reachable only by its direct URL). Done by
@@ -261,7 +265,7 @@ def _ost2_gl_install():
         app_label = kwargs.get("app_label", args[0] if args else None)
         if app_label is None:
             try:
-                url = reverse("admin:ost2_student_grade_lookup")
+                url = reverse("ost2_student_grade_lookup")
             except Exception:
                 url = "/admin/student-grade-lookup/"
             app_list.append({
@@ -285,20 +289,16 @@ def _ost2_gl_install():
     _ost2_gl_log.info("ost2 grade lookup admin page + index link installed")
 
 
-# Prefer installing at settings-import time (before the admin URLconf is built).
-# If that is too early in this process, fall back to the first request_started.
-try:
-    _ost2_gl_install()
-except Exception:
-    from django.core.signals import request_started as _ost2_gl_req
-    from django.dispatch import receiver as _ost2_gl_receiver
+from django.core.signals import request_started as _ost2_gl_req
+from django.dispatch import receiver as _ost2_gl_receiver
 
-    @_ost2_gl_receiver(_ost2_gl_req, dispatch_uid="ost2_grade_lookup_install")
-    def _ost2_gl_boot(sender, **kwargs):
-        try:
-            _ost2_gl_install()
-        except Exception:
-            _ost2_gl_log.exception("ost2 grade lookup: deferred install failed")
+
+@_ost2_gl_receiver(_ost2_gl_req, dispatch_uid="ost2_grade_lookup_install")
+def _ost2_gl_boot(sender, **kwargs):
+    try:
+        _ost2_gl_install()
+    except Exception:
+        _ost2_gl_log.exception("ost2 grade lookup: install failed")
 '''
 
 hooks.Filters.ENV_PATCHES.add_item(("openedx-lms-production-settings", _CODE))
