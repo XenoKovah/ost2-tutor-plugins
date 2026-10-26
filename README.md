@@ -409,6 +409,55 @@ python3 ~/ost2-host-scripts/ost2_completion_nudge.py --only-to xeno@ost2.fyi --u
 Do not put the `--send` cron on dev (it would only write files, and dev holds p's learners' real
 addresses). Tests: `cd host-scripts && python3 -m unittest -v test_ost2_completion_nudge`.
 
+### ost2_bounce_delete.py — delete accounts whose activation email bounced
+
+Daily job (Xeno 2026-10-26). It reads the sending mailbox (`SMTP_USERNAME`, noreply@ost2.fyi)
+read-only over IMAP with the LMS's own App Password. When the sign-up email "Action Required:
+Activate your OpenSecurityTraining2 account" came back as Gmail's "Address not found", it fully
+deletes that never-activated account: LMS, gamma and the Mongo forum store, using the same recipe
+as the manual 2026-10-16/-25 deletions.
+
+**Forged bounces are ignored.** A notice only counts when all of these hold:
+- Gmail's own top `Authentication-Results` shows `dkim=pass` for googlemail.com and `dmarc=pass`
+  for header.from=googlemail.com.
+- The From is exactly `mailer-daemon@googlemail.com` and the Return-Path is null.
+- The delivery-status report is a 5.x.x failure for one recipient, matching Google's "Address not
+  found" text.
+- The returned Message-ID, subject, sender and recipient match a message in Sent Mail.
+
+**Accounts it holds instead of deleting** (it lists them in the email):
+- several accounts on one address;
+- an active or staff account;
+- a certificate, completions, a role, an SSO link or forum posts.
+
+**Accounts it leaves for the next run:** any account under 24 hours old or used in the last 24
+hours. Registration signs the account in, so the person may still be in that first session.
+
+**Backups and undo:** every row is saved under `~/.local/share/ost2-bounce-delete/runs/<time>/`
+(0600) before the deletes run. `restore <run dir>` dry-runs the undo and `restore <run dir> --apply`
+does it.
+
+**Safety limits:**
+- More than `--max-deletes` (10) in one run deletes nothing and sends an alert.
+- A partial failure writes `STOP`, and nothing more is deleted until a human removes it.
+
+The email goes out only when something was deleted, held or looked forged. The full rules are in
+the module docstring.
+
+Install on a box (p only: dev's and beta's mailboxes are not this one):
+
+```
+mkdir -p ~/ost2-host-scripts ~/.local/share/ost2-bounce-delete && chmod 700 ~/.local/share/ost2-bounce-delete
+cp host-scripts/ost2_bounce_delete.py ~/ost2-host-scripts/
+python3 ~/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi --dry-run
+python3 ~/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi --test-apply
+( crontab -l 2>/dev/null; echo '30 6 * * * /usr/bin/python3 /home/ubuntu/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi >> /home/ubuntu/.local/share/ost2-bounce-delete/cron.log 2>&1' ) | crontab -
+```
+
+`--test-apply` runs the LMS and gamma deletes in transactions that are rolled back. The LMS one also
+round-trips its backup. Gamma's delete handlers still drop the user from the Redis leaderboard until
+the next rebuild. Tests: `cd host-scripts && python3 -m unittest -v test_ost2_bounce_delete`.
+
 ### gamma-backfill/ — RGG badge backfills + the daily anti-gaming run
 
 The toolkit behind the 2026-10-02 RGG backfill on p (BACKFILLS.md §0-§8) and the daily
