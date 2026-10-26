@@ -20,7 +20,7 @@ the mailbox: folders are opened read-only and messages fetched with BODY.PEEK.
 
 WHY A FORGED BOUNCE CANNOT DELETE AN ACCOUNT.  Anyone can email noreply@ something that looks like a
 bounce, so the Gmail search is only a pre-filter.  A notice counts only when ALL of these hold
-(verify_notice() and sent_time()):
+(verify_notice() and sent_record()):
 
   1. Google wrote it.  The message's first Authentication-Results header is the one Gmail's own
      mx.google.com adds on delivery (only Gmail's delivery headers may sit above it; a sender's
@@ -35,12 +35,17 @@ bounce, so the Gmail search is only a pre-filter.  A notice counts only when ALL
      sender, that one recipient, and the Message-ID the notice reports -- and a message with that
      Message-ID, subject, sender and recipient is in this mailbox's Sent Mail.
   4. The account fits (checked inside the LMS): exactly one account uses the address, it never
-     activated (is_active=0 and an activation key exists), it is not staff, and the bounced email
-     was sent between 10 minutes before and 30 days after the account registered.
-  5. The person is gone: the account registered over 24 hours ago and has had no sign-in and no
-     courseware activity for 24 hours.  Registration signs the new account in, so someone who
-     mistyped their address can still be learning (or fixing the address on the Account page) in
-     that first session; such an account WAITS and is checked again on the next run.
+     activated, it is not staff, its activation key is the one in the Sent Mail copy's
+     /activate/<key> link (so the bounce was this account's own email: dev sends from the same
+     mailbox), and that email was sent between 10 minutes before and 30 days after it registered.
+  5. The person had their chance (Xeno 2026-10-26: 7 days): the account registered over 7 days ago
+     and has had no sign-in and no courseware activity for 7 days.  Registration signs the new
+     account in, so someone who mistyped their address can still be learning (and fixing the
+     address on the Account page) in that first session.  Until then the account WAITS: it is
+     re-checked every run (pending notices are kept in processed.json, so the IMAP look-back does
+     not limit the wait), and the LMS user preference `ost2_activation_bounce` is set to
+     {"address", "bounced_at", "delete_after"} so the platform can tell the learner (the
+     unactivated-account toast); "delete_after" is null for a HELD account.
 
 An account that passes all of that but has something worth a human look is HELD (listed in the
 email, never deleted): a certificate, block completions, a course role, an SSO link, forum posts
@@ -307,17 +312,24 @@ def verify_notice(raw, sender, subject=ACTIVATION_SUBJECT):
     }
 
 
-def sent_time(sent_headers, info, sender, subject=ACTIVATION_SUBJECT):
-    """Check 3, second half: when we sent the bounced email, from its copy in Sent Mail (or None)."""
-    for raw in sent_headers:
+ACTIVATION_LINK_RE = re.compile(r"/activate/([0-9a-f]{32})(?![0-9a-f])")
+
+
+def sent_record(sent_messages, info, sender, subject=ACTIVATION_SUBJECT):
+    """Check 3, second half: the bounced email's copy in Sent Mail -> {"sent_at", "activation_key"} (or None)."""
+    for raw in sent_messages:
         m = email.message_from_bytes(raw, policy=policy.compat32)
         if squash(m.get("Message-ID")) != info["message_id"]:
             continue
-        if (addresses(m.get_all("From", [])) == [sender.lower()] and addresses(m.get_all("To", [])) == [info["recipient"]]
+        if not (addresses(m.get_all("From", [])) == [sender.lower()] and addresses(m.get_all("To", [])) == [info["recipient"]]
                 and decoded(m.get("Subject")) == subject):
-            moment = parse_date(m.get("Date"))
-            if moment:
-                return moment
+            continue
+        moment = parse_date(m.get("Date"))
+        text = " ".join((part.get_payload(decode=True) or b"").decode(part.get_content_charset() or "utf-8", "replace")
+                        for part in m.walk() if part.get_content_type() in ("text/plain", "text/html"))
+        keys = set(ACTIVATION_LINK_RE.findall(text))
+        if moment and len(keys) == 1:
+            return {"sent_at": moment.isoformat(), "activation_key": keys.pop()}
     return None
 
 
@@ -354,14 +366,25 @@ class Mailbox:
         if typ != "OK":
             raise RuntimeError("cannot open %s: %r" % (self.folders[folder], data))
 
-    def search(self, folder, gmail_query):
-        """[(gmail message id, raw bytes)] for a Gmail search in All Mail / Junk."""
+    def search(self, folder, gmail_query, skip=()):
+        """[(gmail message id, raw bytes)] for a Gmail search in All Mail / Junk, leaving out ids in `skip`."""
         self._select(folder)
         typ, data = self.imap.search(None, "X-GM-RAW", '"%s"' % gmail_query.replace('"', ""))
         if typ != "OK":
             raise RuntimeError("IMAP search failed in %s" % folder)
+        nums = (data[0] or b"").split()
+        if not nums:
+            return []
+        typ, resp = self.imap.fetch(b",".join(nums), "(X-GM-MSGID)")
+        if typ != "OK":
+            raise RuntimeError("IMAP X-GM-MSGID fetch failed in %s" % folder)
+        ids = dict(re.findall(rb"^(\d+) \(.*?X-GM-MSGID (\d+)", b"\n".join(r if isinstance(r, bytes) else r[0] for r in resp if r), re.M))
+        if len(ids) != len(nums):
+            raise RuntimeError("IMAP returned %d message ids for %d hits in %s" % (len(ids), len(nums), folder))
         found = []
-        for num in (data[0] or b"").split():
+        for num in nums:
+            if ids[num].decode() in skip:
+                continue
             typ, resp = self.imap.fetch(num, "(X-GM-MSGID BODY.PEEK[])")
             if typ != "OK":
                 raise RuntimeError("IMAP fetch %s failed" % num)
@@ -373,8 +396,8 @@ class Mailbox:
             found.append((gm.group(1).decode(), raw))
         return found
 
-    def sent_headers(self, message_id):
-        """Headers of every Sent Mail message whose Message-ID header contains message_id."""
+    def sent_messages(self, message_id):
+        """Every Sent Mail message whose Message-ID header contains message_id (whole messages)."""
         if not MESSAGE_ID_RE.match(message_id):
             return []
         self._select("Sent")
@@ -383,7 +406,7 @@ class Mailbox:
             raise RuntimeError("IMAP search of Sent Mail failed")
         found = []
         for num in (data[0] or b"").split():
-            typ, resp = self.imap.fetch(num, "(BODY.PEEK[HEADER])")
+            typ, resp = self.imap.fetch(num, "(BODY.PEEK[])")
             if typ == "OK":
                 found += [p[1] for p in resp if isinstance(p, tuple)]
         return found
@@ -398,19 +421,19 @@ class Mailbox:
 def collect_notices(mailbox, sender, lookback_days, processed):
     """Every not-yet-processed notice from Google's mailer-daemon, checked: [(gm_id, kind, info)]."""
     query = "from:%s newer_than:%dd" % (GOOGLE_DSN_FROM, lookback_days)
-    seen, notices = set(), []
+    seen, notices = set(processed), []
     for folder in ("All", "Junk"):
-        for gm_id, raw in mailbox.search(folder, query):
-            if gm_id in processed or gm_id in seen:
+        for gm_id, raw in mailbox.search(folder, query, skip=seen):
+            if gm_id in seen:
                 continue
             seen.add(gm_id)
             kind, info = verify_notice(raw, sender)
             if kind == "activation":
-                sent_at = sent_time(mailbox.sent_headers(info["message_id"]), info, sender)
-                if sent_at is None:
-                    kind, info = "unmatched", dict(info, reason="no matching activation email in Sent Mail")
+                record = sent_record(mailbox.sent_messages(info["message_id"]), info, sender)
+                if record is None:
+                    kind, info = "unmatched", dict(info, reason="no matching activation email (with one /activate/ link) in Sent Mail")
                 else:
-                    info["sent_at"] = sent_at.isoformat()
+                    info.update(record)
             notices.append((gm_id, kind, info))
     return notices
 
@@ -597,10 +620,11 @@ from social_django.models import UserSocialAuth
 
 JOIN_SLACK = datetime.timedelta(minutes=10)
 RESEND_WINDOW = datetime.timedelta(days=30)
-QUIET = datetime.timedelta(hours=24)
+QUIET = datetime.timedelta(days=7)
+BOUNCE_PREF = "ost2_activation_bounce"
 
 
-def assess(address, sent_at):
+def assess(address, sent_at, activation_key):
     users = list(User.objects.filter(email__iexact=address))
     if not users:
         return {"outcome": "gone"}
@@ -617,8 +641,11 @@ def assess(address, sent_at):
         return hold("the account is active")
     if u.is_staff or u.is_superuser:
         return hold("staff or superuser account")
-    if not Registration.objects.filter(user=u).exists():
+    reg = Registration.objects.filter(user=u).first()
+    if reg is None:
         return hold("no activation key")
+    if reg.activation_key != activation_key:
+        return hold("the bounced activation email carried another account's activation key")
     sent = datetime.datetime.fromisoformat(sent_at)
     if sent < u.date_joined - JOIN_SLACK or sent > u.date_joined + RESEND_WINDOW:
         return hold("the bounced activation email (sent %s) was not for this account (registered %s)" % (sent_at, base["date_joined"]))
@@ -635,8 +662,34 @@ def assess(address, sent_at):
             return hold("has %d %s" % (n, name))
     last = max(t for t in (u.date_joined, u.last_login, StudentModule.objects.filter(student_id=u.id).aggregate(m=Max("modified"))["m"]) if t)
     if timezone.now() - last < QUIET:
-        return dict(base, outcome="wait", reason="still active (last activity %s)" % last.isoformat()[:16])
+        return dict(base, outcome="wait", delete_after=(last + QUIET).isoformat(),
+                    reason="registered or active in the last 7 days (last activity %s)" % last.isoformat()[:16])
     return dict(base, outcome="eligible")
+
+
+def set_flags(flags, clear):
+    """The `ost2_activation_bounce` preference: set for waiting/held accounts, removed once an
+    account's email no longer is the bounced address (it was corrected)."""
+    from openedx.core.djangoapps.user_api.models import UserPreference
+    changed = cleared = 0
+    for f in flags:
+        u = User.objects.filter(id=f["user_id"], email__iexact=f["address"], is_active=False).first()
+        if not u:
+            continue
+        value = json.dumps({"address": f["address"], "bounced_at": f["bounced_at"], "delete_after": f["delete_after"]}, sort_keys=True)
+        if UserPreference.objects.filter(user=u, key=BOUNCE_PREF).values_list("value", flat=True).first() != value:
+            UserPreference.objects.update_or_create(user=u, key=BOUNCE_PREF, defaults={"value": value})
+            changed += 1
+    for uid in clear:
+        for pref in UserPreference.objects.filter(user_id=uid, key=BOUNCE_PREF).select_related("user"):
+            try:
+                address = json.loads(pref.value).get("address", "")
+            except ValueError:
+                address = ""
+            if address.lower() != pref.user.email.lower():
+                pref.delete()
+                cleared += 1
+    return {"changed": changed, "cleared": cleared}
 
 
 def roots_for(ids):
@@ -678,7 +731,7 @@ def delete_users(ids, sched_ids, roots):
 def checked(users):
     """Re-check every target inside the transaction; any change aborts the whole delete."""
     for x in users:
-        a = assess(x["email"], x["sent_at"])
+        a = assess(x["email"], x["sent_at"], x["activation_key"])
         if a["outcome"] != "eligible" or a.get("user_id") != x["id"] or a.get("username") != x["username"]:
             raise Abort("%s (%s) is no longer eligible: %s" % (x["id"], x["username"], a.get("reason", a["outcome"])))
     return [x["id"] for x in users]
@@ -688,7 +741,9 @@ mode = P["mode"]
 try:
     if mode == "assess":
         for c in P["candidates"]:
-            out("ASSESS", dict(assess(c["email"], c["sent_at"]), email=c["email"]))
+            out("ASSESS", dict(assess(c["email"], c["sent_at"], c["activation_key"]), email=c["email"]))
+    elif mode == "flag":
+        out("FLAGGED", set_flags(P["flags"], P["clear"]))
     elif mode == "dump":
         ids = checked(P["users"])
         sched_ids, roots, extra = roots_for(ids)
@@ -1003,7 +1058,7 @@ def render(host, report):
                   % (too_many, report["max_deletes"], too_many), ""]
     title = "WOULD DELETE" if too_many or report.get("dry") else "DELETED"
     for heading, rows in ((title, deleted), ("HELD (not deleted, worth a look)", held),
-                          ("WAITING (still active; checked again next run)", report.get("waiting", []))):
+                          ("WAITING (7-day grace period; checked again every run)", report.get("waiting", []))):
         if not rows:
             continue
         lines += [heading, "-" * len(heading)]
@@ -1012,6 +1067,8 @@ def render(host, report):
             lines.append("      activation email sent %s, bounced %s: %s" % (r["sent_at"][:16], r["noticed_at"][:16], r["status"]))
             if r.get("reason"):
                 lines.append("      %s: %s" % ("waiting" if r.get("outcome") == "wait" else "held because", r["reason"]))
+            if r.get("outcome") == "wait":
+                lines.append("      deleted on or after %s if it stays unused" % r["delete_after"][:16])
         lines.append("")
     if suspicious:
         lines += ["SUSPICIOUS NOTICES (claim to be Google bounces but failed the checks; nothing done)", "-" * 40]
@@ -1032,7 +1089,8 @@ def delete_accounts(args, eligible, run_dir, report):
     The LMS goes first: if its re-check fails nothing has changed yet.  A failure after that leaves a
     partial delete, so STOP is written and later runs only send reminders until a human has looked.
     """
-    users = [{"id": e["user_id"], "username": e["username"], "email": e["email"], "sent_at": e["sent_at"]} for e in eligible]
+    users = [{"id": e["user_id"], "username": e["username"], "email": e["email"], "sent_at": e["sent_at"],
+              "activation_key": e["activation_key"]} for e in eligible]
     os.makedirs(run_dir, mode=0o700)
     lms_dump = only(lms(args, {"mode": "dump", "users": users}), "DUMP")
     gamma_dump = only(gamma(args, {"mode": "dump", "usernames": [u["username"] for u in users]}), "DUMP")
@@ -1079,9 +1137,12 @@ def run(args):
     finally:
         mailbox.close()
 
-    report = {"checked": len(notices), "other": 0, "gone": 0, "deleted": [], "held": [], "waiting": [], "suspicious": [], "max_deletes": args.max_deletes,
-              "dry": args.dry_run or args.test_apply}
+    report = {"checked": len(notices), "other": 0, "gone": 0, "deleted": [], "held": [], "waiting": [], "suspicious": [], "clear": [],
+              "max_deletes": args.max_deletes, "dry": args.dry_run or args.test_apply}
     marks, bounces = {}, {}
+    for gm_id, entry in processed.items():  # accounts still waiting out the grace period
+        if entry.get("outcome") == "wait" and entry.get("info"):
+            bounces.setdefault(entry["info"]["recipient"], []).append((gm_id, entry["info"]))
     for gm_id, kind, info in notices:
         if kind == "other":
             report["other"] += 1
@@ -1095,7 +1156,8 @@ def run(args):
     eligible = []
     if bounces:
         firsts = {addr: min(found, key=lambda x: x[1]["sent_at"])[1] for addr, found in bounces.items()}
-        assessed = lms(args, {"mode": "assess", "candidates": [{"email": a, "sent_at": i["sent_at"]} for a, i in firsts.items()]})
+        assessed = lms(args, {"mode": "assess", "candidates": [
+            {"email": a, "sent_at": i["sent_at"], "activation_key": i["activation_key"]} for a, i in firsts.items()]})
         for tag, a in assessed:
             if tag != "ASSESS":
                 continue
@@ -1106,11 +1168,16 @@ def run(args):
                 report["held"].append(row)
             elif a["outcome"] == "wait":
                 report["waiting"].append(row)
-                continue  # not processed: checked again next run
             else:
                 report["gone"] += 1
-            for gm_id, _ in bounces[a["email"]]:
-                marks[gm_id] = {"outcome": a["outcome"], "recipient": a["email"], "user_id": a.get("user_id")}
+                known = [i.get("user_id") for _, i in bounces[a["email"]] if i.get("user_id")]
+                report["clear"].extend(known)  # the address was corrected: drop the bounce flag
+            for gm_id, info in bounces[a["email"]]:
+                if a["outcome"] == "wait":  # kept with its checked details, re-assessed next run
+                    first = processed.get(gm_id, {}).get("first_at") or now.isoformat()
+                    marks[gm_id] = {"outcome": "wait", "first_at": first, "info": dict(info, user_id=a["user_id"])}
+                else:
+                    marks[gm_id] = {"outcome": a["outcome"], "recipient": a["email"], "user_id": a.get("user_id")}
         if eligible:
             forum = only(mongo(args, mongo_script("dump", [{"id": e["user_id"], "username": e["username"]} for e in eligible])), "DUMP")
             keep = []
@@ -1153,6 +1220,10 @@ def run(args):
         if args.test_apply:
             print(json.dumps(report.get("done", {}), indent=1))
         return 0
+    flags = [{"user_id": r["user_id"], "address": r["email"], "bounced_at": r["noticed_at"], "delete_after": r.get("delete_after")}
+             for r in report["waiting"] + report["held"] if r.get("user_id")]
+    if flags or report["clear"]:
+        report["flagged"] = only(lms(args, {"mode": "flag", "flags": flags, "clear": report["clear"]}), "FLAGGED")
     for gm_id, mark in marks.items():
         processed[gm_id] = dict(mark, at=now.isoformat())
     save_processed(args.state_dir, processed, now)

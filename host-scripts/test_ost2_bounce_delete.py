@@ -121,9 +121,15 @@ def notice(**over):
     return (top + NOTICE.format(**v)).replace("\n", "\r\n").encode()
 
 
-def sent_copy(msgid=MSGID, to=TO, subject=bd.ACTIVATION_SUBJECT, sender=SENDER):
+KEY = "0123456789abcdef0123456789abcdef"
+
+
+def sent_copy(msgid=MSGID, to=TO, subject=bd.ACTIVATION_SUBJECT, sender=SENDER, body=None):
+    if body is None:
+        body = "You're almost there!\r\n\r\nhttps://p.ost2.fyi/activate/%s?next=%%2Fdashboard\r\n" % KEY
     return ("Return-Path: <noreply@ost2.fyi>\r\nFrom: %s\r\nX-Google-Original-From: info@ost2.fyi\r\nSubject: %s\r\n"
-            "To: %s\r\nDate: Mon, 26 Oct 2026 07:42:38 -0000\r\nMessage-ID: %s\r\n\r\n" % (sender, subject, to, msgid)).encode()
+            "To: %s\r\nDate: Mon, 26 Oct 2026 07:42:38 -0000\r\nMessage-ID: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s"
+            % (sender, subject, to, msgid, body)).encode()
 
 
 class GenuineNotice(unittest.TestCase):
@@ -142,18 +148,27 @@ class GenuineNotice(unittest.TestCase):
         reason = "the address couldn" + chr(0x2019) + "t be found, or is unable to receive mail."
         self.assertEqual(bd.verify_notice(notice(text_reason=reason), SENDER)[0], "activation")
 
-    def test_sent_mail_copy_gives_the_send_time(self):
+    def test_sent_mail_copy_gives_the_send_time_and_key(self):
         info = bd.verify_notice(notice(), SENDER)[1]
-        when = bd.sent_time([sent_copy()], info, SENDER)
-        self.assertEqual(when, dt.datetime(2026, 10, 26, 7, 42, 38, tzinfo=dt.timezone.utc))
+        record = bd.sent_record([sent_copy()], info, SENDER)
+        self.assertEqual(record, {"sent_at": dt.datetime(2026, 10, 26, 7, 42, 38, tzinfo=dt.timezone.utc).isoformat(),
+                                  "activation_key": KEY})
 
-    def test_no_sent_mail_copy_means_no_send_time(self):
+    def test_no_matching_sent_mail_copy(self):
         info = bd.verify_notice(notice(), SENDER)[1]
-        self.assertIsNone(bd.sent_time([], info, SENDER))
-        self.assertIsNone(bd.sent_time([sent_copy(msgid="<other@host>")], info, SENDER))
-        self.assertIsNone(bd.sent_time([sent_copy(to="someone.else@gmail.com")], info, SENDER))
-        self.assertIsNone(bd.sent_time([sent_copy(subject="Reset your password")], info, SENDER))
-        self.assertIsNone(bd.sent_time([sent_copy(sender="attacker@example.com")], info, SENDER))
+        self.assertIsNone(bd.sent_record([], info, SENDER))
+        self.assertIsNone(bd.sent_record([sent_copy(msgid="<other@host>")], info, SENDER))
+        self.assertIsNone(bd.sent_record([sent_copy(to="someone.else@gmail.com")], info, SENDER))
+        self.assertIsNone(bd.sent_record([sent_copy(subject="Reset your password")], info, SENDER))
+        self.assertIsNone(bd.sent_record([sent_copy(sender="attacker@example.com")], info, SENDER))
+
+    def test_sent_copy_needs_exactly_one_activation_key(self):
+        info = bd.verify_notice(notice(), SENDER)[1]
+        self.assertIsNone(bd.sent_record([sent_copy(body="no link here")], info, SENDER))
+        two = "https://p.ost2.fyi/activate/%s https://p.ost2.fyi/activate/%s" % (KEY, "f" * 32)
+        self.assertIsNone(bd.sent_record([sent_copy(body=two)], info, SENDER))
+        same_twice = "https://p.ost2.fyi/activate/%s and again /activate/%s" % (KEY, KEY)
+        self.assertEqual(bd.sent_record([sent_copy(body=same_twice)], info, SENDER)["activation_key"], KEY)
 
 
 class Forgeries(unittest.TestCase):
@@ -265,6 +280,12 @@ class Render(unittest.TestCase):
         self.assertIn("TOO MANY (12), nothing deleted", subject)
         self.assertIn("WOULD DELETE", body)
         self.assertIn("NOTHING was deleted", body)
+
+    def test_waiting_shows_the_deletion_date(self):
+        _, body = bd.render("p.ost2.fyi", {"waiting": [self.row(outcome="wait", reason="registered or active in the last 7 days",
+                                                                 delete_after="2026-11-02T07:45:00+00:00")]})
+        self.assertIn("WAITING (7-day grace period", body)
+        self.assertIn("deleted on or after 2026-11-02T07:45", body)
 
     def test_dry_run_says_would_delete(self):
         _, body = bd.render("p.ost2.fyi", {"deleted": [self.row()], "dry": True})

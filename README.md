@@ -430,8 +430,17 @@ as the manual 2026-10-16/-25 deletions.
 - an active or staff account;
 - a certificate, completions, a role, an SSO link or forum posts.
 
-**Accounts it leaves for the next run:** any account under 24 hours old or used in the last 24
-hours. Registration signs the account in, so the person may still be in that first session.
+It also checks that the activation key in the Sent Mail copy's `/activate/<key>` link is this
+account's own key. Dev sends from the same mailbox, so this keeps a dev bounce from deleting a p
+account.
+
+**7-day grace period:** an account is only deleted once it is more than 7 days old and has had
+no sign-in or courseware activity for 7 days. Registration signs the account in, so the person
+may still be in that first session. Until then it WAITS and is re-checked every run (pending
+notices are kept in `processed.json`). While it waits, or when it is held, the job sets the LMS
+user preference `ost2_activation_bounce` to `{"address", "bounced_at", "delete_after"}`. The
+platform can use it to tell the learner (`delete_after` is null when held). The job removes the
+preference once the account's email has been changed away from the bounced address.
 
 **Backups and undo:** every row is saved under `~/.local/share/ost2-bounce-delete/runs/<time>/`
 (0600) before the deletes run. `restore <run dir>` dry-runs the undo and `restore <run dir> --apply`
