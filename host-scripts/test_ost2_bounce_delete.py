@@ -287,6 +287,13 @@ class Render(unittest.TestCase):
         self.assertIn("WAITING (7-day grace period", body)
         self.assertIn("deleted on or after 2026-11-02T07:45", body)
 
+    def test_review_mode_says_nothing_was_deleted(self):
+        subject, body = bd.render("p.ost2.fyi", {"deleted": [self.row()], "review": True})
+        self.assertEqual(subject, "[p.ost2.fyi] Bounced-activation cleanup: 1 due for deletion (review mode, nothing deleted)")
+        self.assertIn("DUE FOR DELETION", body)
+        self.assertIn("nothing was deleted", body)
+        self.assertNotIn("\nDELETED", body)
+
     def test_dry_run_says_would_delete(self):
         _, body = bd.render("p.ost2.fyi", {"deleted": [self.row()], "dry": True})
         self.assertIn("WOULD DELETE", body)

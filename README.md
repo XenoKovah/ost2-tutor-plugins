@@ -446,11 +446,16 @@ preference once the account's email has been changed away from the bounced addre
 (0600) before the deletes run. `restore <run dir>` dry-runs the undo and `restore <run dir> --apply`
 does it.
 
+**Review mode:** `run --review` never deletes. Accounts that are due go in the email as "DUE FOR
+DELETION" (every run, until they are deleted or fixed), and their bounce flags are set with today as
+`delete_after`. p's cron runs with `--review` until the first deletions have been checked by hand;
+a run without `--review` then deletes what is due.
+
 **Safety limits:**
 - More than `--max-deletes` (10) in one run deletes nothing and sends an alert.
 - A partial failure writes `STOP`, and nothing more is deleted until a human removes it.
 
-The email goes out only when something was deleted, held or looked forged. The full rules are in
+The email goes out only when something was deleted, held, due (review mode) or looked forged. The full rules are in
 the module docstring.
 
 Install on a box (p only: dev's and beta's mailboxes are not this one):
@@ -460,8 +465,12 @@ mkdir -p ~/ost2-host-scripts ~/.local/share/ost2-bounce-delete && chmod 700 ~/.l
 cp host-scripts/ost2_bounce_delete.py ~/ost2-host-scripts/
 python3 ~/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi --dry-run
 python3 ~/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi --test-apply
-( crontab -l 2>/dev/null; echo '30 6 * * * /usr/bin/python3 /home/ubuntu/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi >> /home/ubuntu/.local/share/ost2-bounce-delete/cron.log 2>&1' ) | crontab -
+python3 ~/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi --review --lookback-days 30
+( crontab -l 2>/dev/null; echo '30 6 * * * /usr/bin/python3 /home/ubuntu/ost2-host-scripts/ost2_bounce_delete.py run --to xeno@ost2.fyi --review >> /home/ubuntu/.local/share/ost2-bounce-delete/cron.log 2>&1' ) | crontab -
 ```
+
+The `--lookback-days 30` run picks up bounces from before the install; it keeps them as waiting, so
+later 7-day runs still see them. Drop `--review` from the cron line to let it delete on its own.
 
 `--test-apply` runs the LMS and gamma deletes in transactions that are rolled back. The LMS one also
 round-trips its backup. Gamma's delete handlers still drop the user from the Redis leaderboard until

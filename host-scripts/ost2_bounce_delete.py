@@ -64,6 +64,11 @@ re-dumps inside its own transaction and refuses to run if the rows differ from t
 Undo a run with:  ost2_bounce_delete.py restore <run dir>            (dry: insert, compare, roll back)
                   ost2_bounce_delete.py restore <run dir> --apply
 
+REVIEW MODE.  `run --review` never deletes: accounts that are due are emailed as "DUE FOR DELETION"
+(and kept as waiting, so they are listed again every run), and their bounce flags are set.
+Xeno 2026-10-27: p's cron runs with --review until he has checked the first deletions; delete the
+listed accounts with a run without --review.
+
 SAFETY VALVES.  More than --max-deletes (default 10) eligible accounts in one run deletes nothing and
 emails an alert (re-run by hand with a higher --max-deletes after looking).  A failure part-way
 through the deletes writes <state-dir>/STOP; while STOP exists every run only emails a reminder, so
@@ -1036,9 +1041,11 @@ def send(settings, recipient, subject, body):
 
 def render(host, report):
     deleted, held = report.get("deleted", []), report.get("held", [])
-    suspicious, too_many = report.get("suspicious", []), report.get("too_many")
+    suspicious, too_many, review = report.get("suspicious", []), report.get("too_many"), report.get("review")
     bits = []
-    if deleted:
+    if deleted and review:
+        bits.append("%d due for deletion (review mode, nothing deleted)" % len(deleted))
+    elif deleted and not too_many:
         bits.append("deleted %d" % len(deleted))
     if held:
         bits.append("held %d" % len(held))
@@ -1056,7 +1063,10 @@ def render(host, report):
         lines += ["%d accounts qualified, more than --max-deletes %d, so NOTHING was deleted. After checking the list"
                   " below, run by hand:  python3 ~/ost2-host-scripts/ost2_bounce_delete.py run --to <you> --max-deletes %d"
                   % (too_many, report["max_deletes"], too_many), ""]
-    title = "WOULD DELETE" if too_many or report.get("dry") else "DELETED"
+    if review:
+        lines += ["Review mode (--review): nothing was deleted. These accounts are due and are listed again every run."
+                  " To delete them: python3 ~/ost2-host-scripts/ost2_bounce_delete.py run --to <you>", ""]
+    title = ("DUE FOR DELETION" if review else "WOULD DELETE" if too_many or report.get("dry") else "DELETED")
     for heading, rows in ((title, deleted), ("HELD (not deleted, worth a look)", held),
                           ("WAITING (7-day grace period; checked again every run)", report.get("waiting", []))):
         if not rows:
@@ -1195,7 +1205,16 @@ def run(args):
                     marks[gm_id]["outcome"] = "hold"
             eligible = keep
 
-    if len(eligible) > args.max_deletes:
+    if eligible and args.review:
+        report["review"] = True
+        report["deleted"] = eligible
+        for e in eligible:  # kept as waiting (past the lookback too), so every run lists them again
+            e["delete_after"] = now.isoformat()  # the toast: "deleted on or after <today>"
+            for gm_id, info in bounces[e["email"]]:
+                first = processed.get(gm_id, {}).get("first_at") or now.isoformat()
+                marks[gm_id] = {"outcome": "wait", "first_at": first, "info": dict(info, user_id=e["user_id"])}
+        eligible = []
+    elif len(eligible) > args.max_deletes:
         report["too_many"] = len(eligible)
         report["deleted"] = eligible
         for e in eligible:  # leave them unprocessed so the next run reports them again
@@ -1221,18 +1240,18 @@ def run(args):
             print(json.dumps(report.get("done", {}), indent=1))
         return 0
     flags = [{"user_id": r["user_id"], "address": r["email"], "bounced_at": r["noticed_at"], "delete_after": r.get("delete_after")}
-             for r in report["waiting"] + report["held"] if r.get("user_id")]
+             for r in report["waiting"] + report["held"] + (report["deleted"] if report.get("review") else []) if r.get("user_id")]
     if flags or report["clear"]:
         report["flagged"] = only(lms(args, {"mode": "flag", "flags": flags, "clear": report["clear"]}), "FLAGGED")
     for gm_id, mark in marks.items():
         processed[gm_id] = dict(mark, at=now.isoformat())
     save_processed(args.state_dir, processed, now)
-    if report["deleted"] or report["held"] or report["suspicious"] or report.get("too_many"):
+    if report["deleted"] or report["held"] or report["suspicious"] or report.get("too_many") or report.get("review"):
         send(smtp_settings(args), args.to, subject, body)
     clear_failure(args.state_dir)
     print("%s checked=%d deleted=%d held=%d waiting=%d suspicious=%d other=%d gone=%d%s" % (
-        now.isoformat(), report["checked"], 0 if report.get("too_many") else len(report["deleted"]), len(report["held"]),
-        len(report["waiting"]), len(report["suspicious"]), report["other"], report["gone"], " TOO-MANY=%d" % report["too_many"] if report.get("too_many") else ""))
+        now.isoformat(), report["checked"], 0 if report.get("too_many") or report.get("review") else len(report["deleted"]), len(report["held"]),
+        len(report["waiting"]), len(report["suspicious"]), report["other"], report["gone"], " TOO-MANY=%d" % report["too_many"] if report.get("too_many") else " REVIEW-DUE=%d" % len(report["deleted"]) if report.get("review") else ""))
     return 0
 
 
@@ -1264,6 +1283,7 @@ def parser():
     r.add_argument("--lookback-days", type=int, default=7)
     r.add_argument("--max-deletes", type=int, default=10)
     r.add_argument("--dry-run", action="store_true", help="check and print; delete, save and send nothing")
+    r.add_argument("--review", action="store_true", help="never delete: email the accounts that are due (flags are still set)")
     r.add_argument("--test-apply", action="store_true", help="like --dry-run, plus run the deletes and roll them back")
     r.add_argument("--sender", help="report From address (default: tutor CONTACT_EMAIL)")
     s = sub.add_parser("restore", help="put a run's deleted accounts back")
